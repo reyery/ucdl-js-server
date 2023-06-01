@@ -1,0 +1,7 @@
+/node_modules
+/temp
+/test.sim
+/test_data.js
+/test_no_surrounding.sim
+/test_with_surrounding.sim
+/test_with_surrounding1.sim
