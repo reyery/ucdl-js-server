@@ -108,7 +108,7 @@ function fillString(x) {
 async function runJSSimulation(boundary, simulationType, reqSession=null) {
 
   const session = reqSession? reqSession : getSession()
-
+  const otherInfo = {}
   const minCoord = [99999, 99999];
   const maxCoord = [-99999, -99999];
   const coords = []
@@ -203,8 +203,19 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
     queues.push(p)
   }
   await Promise.all(queues)
-  for (const p of queues) { 
-    console.log(await p)
+
+  if (simulationType === 'wind') {
+    const wind_stns = new Set()
+    for (let i = 0; i < PROCESS_LIMIT; i++) {
+      const wind_stn_file = `${genFile}_${i}_wind_stns.txt`
+      if (fs.existsSync(wind_stn_file)) {
+        const wind_stns_used = fs.readFileSync(wind_stn_file, {encoding:'utf8', flag:'r'})
+        for (const stn of wind_stns_used.split(',')) {
+          wind_stns.add(stn.trim())
+        }
+      }
+    }
+    otherInfo.wind_stns = Array.from(wind_stns)
   }
   let compiledResult = []
   for (let i = 0; i < PROCESS_LIMIT; i++) {
@@ -222,7 +233,7 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
   fs.rmSync('temp/' + session, { recursive: true, force: true });
   const fullResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
   console.log(fullResult.length)
-  return fullResult
+  return [fullResult, otherInfo]
 }
 
 function logTime(starttime, simType, otherInfo = '') {
@@ -236,22 +247,10 @@ function logTime(starttime, simType, otherInfo = '') {
   }
 }
 
-app.get('/solar', async (req, res) => {
-  try {
-    const result = await runJSSimulation(bound, 'solar')
-    res.send(result)
-    return
-  } catch (ex) {
-    console.log('ERROR', ex)
-  }
-
-  res.send('ERROR!!')
-})
-
 app.post('/solar', async (req, res) => {
   try {
     const starttime = new Date()
-    const result = await runJSSimulation(req.body.bounds, 'solar', session=req.body.session)
+    const [result, _] = await runJSSimulation(req.body.bounds, 'solar', session=req.body.session)
     res.send({
       result: result
     })
@@ -270,7 +269,7 @@ app.post('/solar', async (req, res) => {
 app.post('/sky', async (req, res) => {
   try {
     const starttime = new Date()
-    const result = await runJSSimulation(req.body.bounds, 'sky', session=req.body.session)
+    const [result, _] = await runJSSimulation(req.body.bounds, 'sky', session=req.body.session)
     res.send({
       result: result
     })
@@ -289,9 +288,10 @@ app.post('/sky', async (req, res) => {
 app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
-    const result = await runJSSimulation(req.body.bounds, 'wind', session=req.body.session)
+    const [result, otherInfo] = await runJSSimulation(req.body.bounds, 'wind', session=req.body.session)
     res.send({
-      result: result
+      result: result,
+      wind_stns: otherInfo.wind_stns
     })
     const origin = req.socket.remoteAddress;
     logTime(starttime, 'wind', origin)
@@ -427,7 +427,7 @@ app.post('/check_progress', async (req, res) => {
 async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
   const session = reqSession? reqSession : getSession()
   const {extent, data, simBoundary, featureBoundary, gridSize} = reqBody
-
+  const otherInfo = {}
   const boundClipper = new Shape([featureBoundary.map(coord => {return {X: coord[0] * 1000000, Y: coord[1] * 1000000}})])
   boundClipper.fixOrientation()
   console.log('boundClipper', boundClipper, boundClipper.totalArea())
@@ -531,7 +531,6 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
   const genFile = 'temp/' + session + '/file_' + session + '.sim'
   console.log('writing file: file_' + session + '.sim')
   fs.writeFileSync(genFile, gen)
-  fs.writeFileSync('./test_with_surrounding1.sim', gen)
 
   let closest_stn = {id: 'S24', dist2: null}
   if (simulationType === 'wind') {
@@ -558,9 +557,6 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
             if (error) {
               console.log(`error: ${simulationType} ${i}\n`)
               console.log(error)
-              // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-              //   if (err) throw err;
-              // });
               reject(error);
               return;
             }
@@ -577,8 +573,19 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
     queues.push(p)
   }
   await Promise.all(queues)
-  for (const p of queues) { 
-    console.log(await p)
+
+  if (simulationType === 'wind') {
+    const wind_stns = new Set()
+    for (let i = 0; i < PROCESS_LIMIT; i++) {
+      const wind_stn_file = `${genFile}_${i}_wind_stns.txt`
+      if (fs.existsSync(wind_stn_file)) {
+        const wind_stns_used = fs.readFileSync(wind_stn_file, {encoding:'utf8', flag:'r'})
+        for (const stn of wind_stns_used.split(',')) {
+          wind_stns.add(stn.trim())
+        }
+      }
+    }
+    otherInfo.wind_stns = Array.from(wind_stns)
   }
   let compiledResult = []
   for (let i = 0; i < PROCESS_LIMIT; i++) {
@@ -595,13 +602,13 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
   console.log('deleting file: file_' + session + '.sim')
   fs.rmSync('temp/' + session, { recursive: true, force: true });
   const fullResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
-  return [fullResult, surroundingBlks]
+  return [fullResult, surroundingBlks, otherInfo]
 }
 
 app.post('/solar_upload', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, surrounding] = await runUploadJSSimulation(req.body, 'solar', session=req.body.session)
+    const [result, surrounding, _] = await runUploadJSSimulation(req.body, 'solar', session=req.body.session)
     res.send({
       result: result,
       surrounding: surrounding
@@ -622,7 +629,7 @@ app.post('/solar_upload', async (req, res) => {
 app.post('/sky_upload', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, surrounding] = await runUploadJSSimulation(req.body, 'sky', session=req.body.session, gridSize=10)
+    const [result, surrounding, _] = await runUploadJSSimulation(req.body, 'sky', session=req.body.session, gridSize=10)
     res.send({
       result: result,
       surrounding: surrounding
@@ -642,10 +649,11 @@ app.post('/sky_upload', async (req, res) => {
 app.post('/wind_upload', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, surrounding] = await runUploadJSSimulation(req.body, 'wind', session=req.body.session)
+    const [result, surrounding, otherInfo] = await runUploadJSSimulation(req.body, 'wind', session=req.body.session)
     res.send({
       result: result,
-      surrounding: surrounding
+      surrounding: surrounding,
+      wind_stns: otherInfo.wind_stns
     })
     const origin = req.socket.remoteAddress;
     logTime(starttime, 'wind', origin)
