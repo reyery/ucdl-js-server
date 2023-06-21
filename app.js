@@ -16,6 +16,9 @@ const app = express()
 app.use(cors())
 app.use(express.json({limit: '10mb'}))
 
+if (!fs.existsSync('temp')) {
+  fs.mkdirSync('temp')
+}
 const port = 5202
 
 const bound = [
@@ -326,7 +329,7 @@ app.post('/getAreaInfo', async (req, res) => {
     boundClipper.fixOrientation()
     console.log(boundClipper.totalArea())
 
-    const shpFile = await shapefile.open("../ucdl-simulation/src/assets/_shp_/singapore_buildings.shp")
+    const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
 
     let count = 0
     let shpArea = 0
@@ -466,7 +469,7 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
 
   // add buildings from shape file
 
-  const shpFile = await shapefile.open("../ucdl-simulation/src/assets/_shp_/singapore_buildings.shp")
+  const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
 
   const limExt = [
     boundExt[0] - SIM_DISTANCE_LIMIT_LATLONG,

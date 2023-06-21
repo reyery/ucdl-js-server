@@ -133,6 +133,6 @@ async function readSource(source) {
     }
 }
 
-shapefile.open("../ucdl-simulation/src/assets/_shp_/singapore_buildings.shp")
+shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
   .then(readSource)
   .catch(error => console.error(error.stack));

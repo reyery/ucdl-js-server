@@ -261,7 +261,7 @@ function eval_wind(sim, gen_file, weather_stn='S24') {
 
 
 async function readSource(bounds) {
-    const source = await shapefile.open("assets/_shp_/singapore_buildings.shp")
+    const source = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
     const jsonData = {
         "type": "FeatureCollection",
         "name": "sg_dwelling_simplified3",
