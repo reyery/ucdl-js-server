@@ -45,7 +45,7 @@ async function writeModel(geom, coord) {
     const coords = coord.split('__').map(x => Number(x))
     const coordStr = coords.map(fillString).join('_')
     console.log('writing', coordStr)
-    fs.writeFileSync('assets/models/data_' + coordStr + '.sim', exportedString);
+    fs.writeFileSync(process.cwd() + '/assets/models/data_' + coordStr + '.sim', exportedString);
 }
 function fillString(x) {
     if (x < 0) {
@@ -94,7 +94,7 @@ async function processData(geom, coord) {
     mfn.attrib.Set(pgon, 'cluster', 0)
     const exportedString = (await mfn.io.ExportData(null, 'sim'));
     const coordStr = coords.map(fillString).join('_')
-    fs.writeFileSync('assets/simdata/data_' + coordStr + '.sim', exportedString);
+    fs.writeFileSync(process.cwd() + '/assets/simdata/data_' + coordStr + '.sim', exportedString);
 
 }
 
@@ -133,6 +133,6 @@ async function readSource(source) {
     }
 }
 
-shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
-  .then(readSource)
-  .catch(error => console.error(error.stack));
+// shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
+//   .then(readSource)
+//   .catch(error => console.error(error.stack));

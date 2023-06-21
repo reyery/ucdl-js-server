@@ -128,7 +128,7 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
   const promises = []
   for (let i = Math.floor(minCoord[0] / TILE_SIZE) - 1; i <= Math.floor(maxCoord[0] / TILE_SIZE) + 1; i++) {
     for (let j = Math.floor(minCoord[1] / TILE_SIZE) - 1; j <= Math.floor(maxCoord[1] / TILE_SIZE) + 1; j++) {
-      const p = new Promise(resolve => fs.readFile('assets/models/data_' +
+      const p = new Promise(resolve => fs.readFile(process.cwd() + '/assets/models/data_' +
         fillString(i * TILE_SIZE) + '_' + fillString(j * TILE_SIZE) +
         '.sim', 'utf8', (err, data) => {
           if (err) {
