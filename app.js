@@ -2,7 +2,7 @@ const express = require('express')
 const cors = require('cors')
 const generate = require("./simulations/sim_generate").execute;
 const Shape = require('@doodle3d/clipper-js').default;
-
+const path = require('path'); 
 
 const shapefile = require("shapefile");
 const proj4 = require('proj4');
@@ -179,7 +179,7 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
     }
   }
   const pool = new Piscina()
-  const options = {filename: 'simulations/sim_execute.js'}
+  const options = {filename: path.resolve("./", 'simulations/sim_execute.js')}
   const queues = []
   for (let i = 0; i < PROCESS_LIMIT; i++) {
     queues.push(`${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`)
@@ -560,7 +560,7 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
   console.log('start running!!')
 
   const pool = new Piscina()
-  const options = {filename: 'simulations/sim_execute.js'}
+  const options = {filename: path.resolve("./", 'simulations/sim_execute.js')}
   const queues = []
   for (let i = 0; i < PROCESS_LIMIT; i++) {
     queues.push(`${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`)
