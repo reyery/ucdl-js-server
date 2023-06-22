@@ -10,6 +10,7 @@ const SIMFuncs = require("@design-automation/mobius-sim-funcs").SIMFuncs;
 const fs = require('fs');
 const { exec } = require("child_process");
 const { sg_wind_stn_data } = require('./simulations/sg_wind_station_data');
+const { Piscina } = require('piscina');
 
 
 const app = express()
@@ -177,35 +178,42 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
         }
     }
   }
-
+  const pool = new Piscina()
+  const options = {filename: 'simulations/sim_execute.js'}
   const queues = []
   for (let i = 0; i < PROCESS_LIMIT; i++) {
-    const p = new Promise((resolve, reject) => {
-      try {
-        exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`,
-          (error, stdout, stderr) => {
-            if (error) {
-              console.log(`error: ${simulationType} ${i}\n`)
-              console.log(error)
-              // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-              //   if (err) throw err;
-              // });
-              reject(error);
-              return;
-            }
-            resolve(stdout)
-          })
-      } catch (ex) {
-        console.log(`error: ${simulationType} ${i}\n`)
-        console.log(ex)
-        // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-        //   if (err) throw err;
-        // });
-      }
-    })
-    queues.push(p)
+    queues.push(`${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`)
   }
-  await Promise.all(queues)
+  await Promise.all(queues.map(x => pool.run(x, options)))
+
+  // const queues = []
+  // for (let i = 0; i < PROCESS_LIMIT; i++) {
+  //   const p = new Promise((resolve, reject) => {
+  //     try {
+  //       exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`,
+  //         (error, stdout, stderr) => {
+  //           if (error) {
+  //             console.log(`error: ${simulationType} ${i}\n`)
+  //             console.log(error)
+  //             // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
+  //             //   if (err) throw err;
+  //             // });
+  //             reject(error);
+  //             return;
+  //           }
+  //           resolve(stdout)
+  //         })
+  //     } catch (ex) {
+  //       console.log(`error: ${simulationType} ${i}\n`)
+  //       console.log(ex)
+  //       // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
+  //       //   if (err) throw err;
+  //       // });
+  //     }
+  //   })
+  //   queues.push(p)
+  // }
+  // await Promise.all(queues)
 
   if (simulationType === 'wind') {
     const wind_stns = new Set()
@@ -551,31 +559,38 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
 
   console.log('start running!!')
 
+  const pool = new Piscina()
+  const options = {filename: 'simulations/sim_execute.js'}
   const queues = []
   for (let i = 0; i < PROCESS_LIMIT; i++) {
-    const p = new Promise((resolve, reject) => {
-      try {
-        exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`,
-          (error, stdout, stderr) => {
-            if (error) {
-              console.log(`error: ${simulationType} ${i}\n`)
-              console.log(error)
-              reject(error);
-              return;
-            }
-            resolve(stdout)
-          })
-      } catch (ex) {
-        console.log(`error: ${simulationType} ${i}\n`)
-        console.log(ex)
-        // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-        //   if (err) throw err;
-        // });
-      }
-    })
-    queues.push(p)
+    queues.push(`${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`)
   }
-  await Promise.all(queues)
+  await Promise.all(queues.map(x => pool.run(x, options)))
+  // const queues = []
+  // for (let i = 0; i < PROCESS_LIMIT; i++) {
+  //   const p = new Promise((resolve, reject) => {
+  //     try {
+  //       exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`,
+  //         (error, stdout, stderr) => {
+  //           if (error) {
+  //             console.log(`error: ${simulationType} ${i}\n`)
+  //             console.log(error)
+  //             reject(error);
+  //             return;
+  //           }
+  //           resolve(stdout)
+  //         })
+  //     } catch (ex) {
+  //       console.log(`error: ${simulationType} ${i}\n`)
+  //       console.log(ex)
+  //       // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
+  //       //   if (err) throw err;
+  //       // });
+  //     }
+  //   })
+  //   queues.push(p)
+  // }
+  // await Promise.all(queues)
 
   if (simulationType === 'wind') {
     const wind_stns = new Set()

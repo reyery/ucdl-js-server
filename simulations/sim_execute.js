@@ -2,7 +2,6 @@ const SIMFuncs = require("@design-automation/mobius-sim-funcs").SIMFuncs;
 const fs = require('fs');
 
 const shared = require("./sim_shared.js");
-const generate = require("./sim_generate.js").execute;
 const sg_wind = require('./sg_wind_all.js').sg_wind;
 const sg_stn_data = require('./sg_wind_station_data.js').sg_wind_stn_data;
 const proj4 = require('proj4');
@@ -367,11 +366,23 @@ async function simExecute(type, genFile, index, PROCESS_LIMIT, closest_stn_id) {
     // return sim
 }
 
-const type = process.argv[2]
-const genfile = process.argv[3]
-const index = Number(process.argv[4])
-const lim = Number(process.argv[5])
-const closest_stn_id = process.argv[6]
-if (type && genfile) {
-    simExecute(type, genfile, index, lim, closest_stn_id)
+module.exports = (content) => {
+    const argv = content.split(' ')
+    const type = argv[0]
+    const genfile = argv[1]
+    const index = Number(argv[2])
+    const lim = Number(argv[3])
+    const closest_stn_id = argv[4]
+    if (type && genfile) {
+        simExecute(type, genfile, index, lim, closest_stn_id)
+    }
 }
+
+// const type = process.argv[2]
+// const genfile = process.argv[3]
+// const index = Number(process.argv[4])
+// const lim = Number(process.argv[5])
+// const closest_stn_id = process.argv[6]
+// if (type && genfile) {
+//     simExecute(type, genfile, index, lim, closest_stn_id)
+// }
