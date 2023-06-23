@@ -74,7 +74,7 @@ const config = {
   "f_visib_max": 60,
 }
 const PROCESS_LIMIT = 20
-const SIM_DISTANCE_LIMIT_METER =  300
+const SIM_DISTANCE_LIMIT_METER =  200
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
 
 
@@ -113,43 +113,96 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
 
   const session = reqSession? reqSession : getSession()
   const otherInfo = {}
-  const minCoord = [99999, 99999];
-  const maxCoord = [-99999, -99999];
+  // const minCoord = [99999, 99999];
+  // const maxCoord = [-99999, -99999];
+  const limExt = [999, 999, -999, -999];
   const coords = []
   for (const latlong of boundary) {
     const coord = [...proj_obj.forward(latlong), 0]
-    minCoord[0] = Math.min(coord[0], minCoord[0])
-    minCoord[1] = Math.min(coord[1], minCoord[1])
-    maxCoord[0] = Math.max(coord[0], maxCoord[0])
-    maxCoord[1] = Math.max(coord[1], maxCoord[1])
+    // minCoord[0] = Math.min(coord[0], minCoord[0])
+    // minCoord[1] = Math.min(coord[1], minCoord[1])
+    // maxCoord[0] = Math.max(coord[0], maxCoord[0])
+    // maxCoord[1] = Math.max(coord[1], maxCoord[1])
+    limExt[0] = Math.min(latlong[0], limExt[0])
+    limExt[1] = Math.min(latlong[1], limExt[1])
+    limExt[2] = Math.max(latlong[0], limExt[2])
+    limExt[3] = Math.max(latlong[1], limExt[3])
     coords.push(coord)
   }
 
+  console.log('coords', coords)
+
   const mfn = new SIMFuncs();
-  const promises = []
-  for (let i = Math.floor(minCoord[0] / TILE_SIZE) - 1; i <= Math.floor(maxCoord[0] / TILE_SIZE) + 1; i++) {
-    for (let j = Math.floor(minCoord[1] / TILE_SIZE) - 1; j <= Math.floor(maxCoord[1] / TILE_SIZE) + 1; j++) {
-      const p = new Promise(resolve => fs.readFile(process.cwd() + '/assets/models/data_' +
-        fillString(i * TILE_SIZE) + '_' + fillString(j * TILE_SIZE) +
-        '.sim', 'utf8', (err, data) => {
-          if (err) {
-            console.log('ERROR', err)
-            resolve(null)
-            return null
-          }
-          resolve(data)
-        }))
-      promises.push(p)
+  const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
+
+  limExt[0] -= SIM_DISTANCE_LIMIT_LATLONG,
+  limExt[1] -= SIM_DISTANCE_LIMIT_LATLONG,
+  limExt[0] += SIM_DISTANCE_LIMIT_LATLONG,
+  limExt[1] += SIM_DISTANCE_LIMIT_LATLONG,
+
+  console.log('limExt', limExt)
+  // const surroundingBlks = []
+  while (true) {
+    const result = await shpFile.read()
+    if (!result || result.done) { break; }
+
+    let check = false
+    let dataCoord = result.value.geometry.coordinates[0]
+    if (dataCoord[0][0] && typeof dataCoord[0][0] !== 'number'){
+      dataCoord = dataCoord[0]
     }
+    for (const c of dataCoord) {
+      if (c[0] < limExt[0] || c[1] < limExt[1] || c[0] > limExt[2] || c[1] > limExt[3]) {
+      } else {
+        check = true
+        break
+      }
+    }
+    if (!check) { continue }
+    const pos = []
+    for (const c of dataCoord) {
+      const nc = proj_obj.forward(c)
+      nc.push(0)
+      pos.push(nc)
+    }
+
+    const ps = mfn.make.Position(pos)
+    const pg = mfn.make.Polygon(ps)
+    const pgons = mfn.make.Extrude(pg, result.value.properties.AGL, 1, 'quads')
+    mfn.attrib.Set(pgons, 'cluster', 1)
+    mfn.attrib.Set(pgons, 'type', 'obstruction')
+    mfn.attrib.Set(pgons, 'obstruction', true)
+
+    // surroundingBlks.push({
+    //   coord: pos,
+    //   height: result.value.properties.AGL
+    // })
   }
 
-  await Promise.all(promises)
-  for (const promise of promises) {
-    const model = await promise
-    if (model) {
-      await mfn.io.Import(model, 'sim');
-    }
-  }
+  // const promises = []
+  // for (let i = Math.floor(minCoord[0] / TILE_SIZE) - 1; i <= Math.floor(maxCoord[0] / TILE_SIZE) + 1; i++) {
+  //   for (let j = Math.floor(minCoord[1] / TILE_SIZE) - 1; j <= Math.floor(maxCoord[1] / TILE_SIZE) + 1; j++) {
+  //     const p = new Promise(resolve => fs.readFile(process.cwd() + '/assets/models/data_' +
+  //       fillString(i * TILE_SIZE) + '_' + fillString(j * TILE_SIZE) +
+  //       '.sim', 'utf8', (err, data) => {
+  //         if (err) {
+  //           console.log('ERROR', err)
+  //           resolve(null)
+  //           return null
+  //         }
+  //         resolve(data)
+  //       }))
+  //     promises.push(p)
+  //   }
+  // }
+
+  // await Promise.all(promises)
+  // for (const promise of promises) {
+  //   const model = await promise
+  //   if (model) {
+  //     await mfn.io.Import(model, 'sim');
+  //   }
+  // }
   const allObstructions = mfn.query.Get('pg', null)
   mfn.attrib.Set(allObstructions, 'cluster', 1)
   mfn.attrib.Set(allObstructions, 'type', 'obstruction')
