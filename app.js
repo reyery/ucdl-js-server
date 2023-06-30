@@ -109,9 +109,10 @@ function fillString(x) {
 
 
 
-async function runJSSimulation(boundary, simulationType, reqSession=null) {
-
+async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   const session = reqSession? reqSession : getSession()
+  const boundary = reqBody.bounds
+  const gridSize = reqBody.gridSize
   const otherInfo = {}
   // const minCoord = [99999, 99999];
   // const maxCoord = [-99999, -99999];
@@ -213,7 +214,7 @@ async function runJSSimulation(boundary, simulationType, reqSession=null) {
   mfn.attrib.Set(pgon, 'type', 'site')
   mfn.attrib.Set(pgon, 'cluster', 0)
 
-  const gen = await generate(mfn, config)
+  const gen = await generate(mfn, config, gridSize)
   fs.mkdirSync('temp/' + session)
   const genFile = 'temp/' + session + '/file_' + session + '.sim'
   console.log('writing file: file_' + session + '.sim')
@@ -314,7 +315,7 @@ function logTime(starttime, simType, otherInfo = '') {
 app.post('/solar', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, _] = await runJSSimulation(req.body.bounds, 'solar', session=req.body.session)
+    const [result, _] = await runJSSimulation(req.body, 'solar', session=req.body.session)
     res.send({
       result: result
     })
@@ -333,7 +334,7 @@ app.post('/solar', async (req, res) => {
 app.post('/sky', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, _] = await runJSSimulation(req.body.bounds, 'sky', session=req.body.session)
+    const [result, _] = await runJSSimulation(req.body, 'sky', session=req.body.session)
     res.send({
       result: result
     })
@@ -352,7 +353,7 @@ app.post('/sky', async (req, res) => {
 app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, otherInfo] = await runJSSimulation(req.body.bounds, 'wind', session=req.body.session)
+    const [result, otherInfo] = await runJSSimulation(req.body, 'wind', session=req.body.session)
     res.send({
       result: result,
       wind_stns: otherInfo.wind_stns
