@@ -43,37 +43,12 @@ const bound = [
 
 const LONGLAT = [103.778329, 1.298759];
 const TILE_SIZE = 500;
-const config = {
-  "latitude": 1.298759,
-  "longitude": 103.778329,
-  "g_solar_min": 0,
-  "g_solar_max": 50,
-  "g_sky_min": 50,
-  "g_sky_max": 100,
-  "g_uhi_min": 0,
-  "g_uhi_max": 4,
-  "g_wind_min": 60,
-  "g_wind_max": 100,
-  "g_irr_min": 0,
-  "g_irr_max": 800,
-  "g_irr_rad_min": 0,
-  "g_irr_rad_max": 800,
-  "f_solar_min": 0,
-  "f_solar_max": 50,
-  "f_sky_min": 50,
-  "f_sky_max": 100,
-  "f_irr_min": 0,
-  "f_irr_max": 500,
-  "f_irr_rad_min": 0,
-  "f_irr_rad_max": 500,
-  "f_noise_min": 0,
-  "f_noise_max": 60,
-  "f_unob_min": 80,
-  "f_unob_max": 100,
-  "f_visib_min": 0,
-  "f_visib_max": 60,
+const RESOURCE_LIM_DICT = {
+  10: 30,
+  5: 40,
+  2: 60,
+  1: 60
 }
-const PROCESS_LIMIT = 20
 const SIM_DISTANCE_LIMIT_METER =  200
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
 
@@ -113,6 +88,7 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   const session = reqSession? reqSession : getSession()
   const boundary = reqBody.bounds
   const gridSize = reqBody.gridSize
+  const processLimit = RESOURCE_LIM_DICT[gridSize]
   const otherInfo = {}
   // const minCoord = [99999, 99999];
   // const maxCoord = [-99999, -99999];
@@ -174,36 +150,8 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
     mfn.attrib.Set(pgons, 'type', 'obstruction')
     mfn.attrib.Set(pgons, 'obstruction', true)
 
-    // surroundingBlks.push({
-    //   coord: pos,
-    //   height: result.value.properties.AGL
-    // })
   }
 
-  // const promises = []
-  // for (let i = Math.floor(minCoord[0] / TILE_SIZE) - 1; i <= Math.floor(maxCoord[0] / TILE_SIZE) + 1; i++) {
-  //   for (let j = Math.floor(minCoord[1] / TILE_SIZE) - 1; j <= Math.floor(maxCoord[1] / TILE_SIZE) + 1; j++) {
-  //     const p = new Promise(resolve => fs.readFile(process.cwd() + '/assets/models/data_' +
-  //       fillString(i * TILE_SIZE) + '_' + fillString(j * TILE_SIZE) +
-  //       '.sim', 'utf8', (err, data) => {
-  //         if (err) {
-  //           console.log('ERROR', err)
-  //           resolve(null)
-  //           return null
-  //         }
-  //         resolve(data)
-  //       }))
-  //     promises.push(p)
-  //   }
-  // }
-
-  // await Promise.all(promises)
-  // for (const promise of promises) {
-  //   const model = await promise
-  //   if (model) {
-  //     await mfn.io.Import(model, 'sim');
-  //   }
-  // }
   const allObstructions = mfn.query.Get('pg', null)
   mfn.attrib.Set(allObstructions, 'cluster', 1)
   mfn.attrib.Set(allObstructions, 'type', 'obstruction')
@@ -211,14 +159,22 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
 
   const pos = mfn.make.Position(coords)
   const pgon = mfn.make.Polygon(pos)
+  
+  // const [cen, _, __, size] = mfn.calc.BBox(pgon);
+  // console.log('cen, _, __, size', cen, _, __, size)
   mfn.attrib.Set(pgon, 'type', 'site')
   mfn.attrib.Set(pgon, 'cluster', 0)
 
-  const gen = await generate(mfn, config, gridSize)
+  const gen = await generate(mfn, gridSize)
   fs.mkdirSync('temp/' + session)
   const genFile = 'temp/' + session + '/file_' + session + '.sim'
   console.log('writing file: file_' + session + '.sim')
   fs.writeFileSync(genFile, gen)
+  console.log('finished writing file')
+  const pgons = mfn.query.Get('pg', null);
+  mfn.edit.Delete(pgons, 'delete_selected');
+  delete mfn
+  delete gen
 
   let closest_stn = {id: 'S24', dist2: null}
   if (simulationType === 'wind') {
@@ -235,16 +191,16 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   const pool = new Piscina()
   const options = {filename: path.resolve("./", 'simulations/sim_execute.js')}
   const queues = []
-  for (let i = 0; i < PROCESS_LIMIT; i++) {
-    queues.push(`${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`)
+  for (let i = 0; i < processLimit; i++) {
+    queues.push(`${simulationType} ${genFile} ${i} ${processLimit} ${closest_stn.id}`)
   }
   await Promise.all(queues.map(x => pool.run(x, options)))
+  pool.destroy()
 
-  // const queues = []
-  // for (let i = 0; i < PROCESS_LIMIT; i++) {
+  // for (let i = 0; i < processLimit; i++) {
   //   const p = new Promise((resolve, reject) => {
   //     try {
-  //       exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`,
+  //       exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${processLimit} ${closest_stn.id}`,
   //         (error, stdout, stderr) => {
   //           if (error) {
   //             console.log(`error: ${simulationType} ${i}\n`)
@@ -271,7 +227,7 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
 
   if (simulationType === 'wind') {
     const wind_stns = new Set()
-    for (let i = 0; i < PROCESS_LIMIT; i++) {
+    for (let i = 0; i < processLimit; i++) {
       const wind_stn_file = `${genFile}_${i}_wind_stns.txt`
       if (fs.existsSync(wind_stn_file)) {
         const wind_stns_used = fs.readFileSync(wind_stn_file, {encoding:'utf8', flag:'r'})
@@ -283,7 +239,7 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
     otherInfo.wind_stns = Array.from(wind_stns)
   }
   let compiledResult = []
-  for (let i = 0; i < PROCESS_LIMIT; i++) {
+  for (let i = 0; i < processLimit; i++) {
     try {
       const readfile = `${genFile}_${i}.txt`
       const fileresult = fs.readFileSync(readfile, {encoding:'utf8', flag:'r'})
@@ -451,37 +407,37 @@ app.post('/getAreaInfo', async (req, res) => {
 })
 
 app.post('/check_progress', async (req, res) => {
-  try {
-    const filePrefix = 'temp/' + req.body.session  + '/file_' + req.body.session + '.sim'
-    console.log('checking progress of', filePrefix)
-    progress = [0, 0]
-    for (let i = 0; i < PROCESS_LIMIT; i++) {
-      try {
-        const fileresult = fs.readFileSync(filePrefix + '_' + index + '_progress', {encoding:'utf8', flag:'r'})
-        if (fileresult) {
-          data = fileresult.split(' ').map(x => Number(x))
-          progress[0] += data[0]
-          progress[1] += data[1]
-        }
-      } catch (ex) {
-        console.log('!!ERROR!! at index', i)
-        console.log('!!ERROR!!:', ex)
-      }
-    }
-    if (progress[1] === 0) {
-      res.send({
-        progress: 0
-      })
-      return
-    }
-    res.send({
-      progress: Math.round(progress[0] / progress[1] * 1000) / 10
-    })
+  // try {
+  //   const filePrefix = 'temp/' + req.body.session  + '/file_' + req.body.session + '.sim'
+  //   console.log('checking progress of', filePrefix)
+  //   progress = [0, 0]
+  //   for (let i = 0; i < PROCESS_LIMIT; i++) {
+  //     try {
+  //       const fileresult = fs.readFileSync(filePrefix + '_' + index + '_progress', {encoding:'utf8', flag:'r'})
+  //       if (fileresult) {
+  //         data = fileresult.split(' ').map(x => Number(x))
+  //         progress[0] += data[0]
+  //         progress[1] += data[1]
+  //       }
+  //     } catch (ex) {
+  //       console.log('!!ERROR!! at index', i)
+  //       console.log('!!ERROR!!:', ex)
+  //     }
+  //   }
+  //   if (progress[1] === 0) {
+  //     res.send({
+  //       progress: 0
+  //     })
+  //     return
+  //   }
+  //   res.send({
+  //     progress: Math.round(progress[0] / progress[1] * 1000) / 10
+  //   })
 
-    return
-  } catch (ex) {
-    console.log('ERROR', ex)
-  }
+  //   return
+  // } catch (ex) {
+  //   console.log('ERROR', ex)
+  // }
 
   res.send({
     progress: 0
@@ -492,6 +448,7 @@ app.post('/check_progress', async (req, res) => {
 async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
   const session = reqSession? reqSession : getSession()
   const {extent, data, simBoundary, featureBoundary, gridSize} = reqBody
+  const processLimit = RESOURCE_LIM_DICT[gridSize]
   const otherInfo = {}
   const boundClipper = new Shape([featureBoundary.map(coord => {return {X: coord[0] * 1000000, Y: coord[1] * 1000000}})])
   boundClipper.fixOrientation()
@@ -589,13 +546,18 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
     })
   }
 
-  const gen = await generate(mfn, config, gridSize)
+  const gen = await generate(mfn, gridSize)
   if (!fs.existsSync('temp/' + session)) {
     fs.mkdirSync('temp/' + session)
   }
   const genFile = 'temp/' + session + '/file_' + session + '.sim'
   console.log('writing file: file_' + session + '.sim')
   fs.writeFileSync(genFile, gen)
+  console.log('finished writing file')
+  const pgons = mfn.query.Get('pg', null);
+  mfn.edit.Delete(pgons, 'delete_selected');
+  delete mfn
+  delete gen
 
   let closest_stn = {id: 'S24', dist2: null}
   if (simulationType === 'wind') {
@@ -616,39 +578,15 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
   const pool = new Piscina()
   const options = {filename: path.resolve("./", 'simulations/sim_execute.js')}
   const queues = []
-  for (let i = 0; i < PROCESS_LIMIT; i++) {
-    queues.push(`${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`)
+  for (let i = 0; i < processLimit; i++) {
+    queues.push(`${simulationType} ${genFile} ${i} ${processLimit} ${closest_stn.id}`)
   }
   await Promise.all(queues.map(x => pool.run(x, options)))
-  // const queues = []
-  // for (let i = 0; i < PROCESS_LIMIT; i++) {
-  //   const p = new Promise((resolve, reject) => {
-  //     try {
-  //       exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${PROCESS_LIMIT} ${closest_stn.id}`,
-  //         (error, stdout, stderr) => {
-  //           if (error) {
-  //             console.log(`error: ${simulationType} ${i}\n`)
-  //             console.log(error)
-  //             reject(error);
-  //             return;
-  //           }
-  //           resolve(stdout)
-  //         })
-  //     } catch (ex) {
-  //       console.log(`error: ${simulationType} ${i}\n`)
-  //       console.log(ex)
-  //       // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-  //       //   if (err) throw err;
-  //       // });
-  //     }
-  //   })
-  //   queues.push(p)
-  // }
-  // await Promise.all(queues)
+  pool.destroy()
 
   if (simulationType === 'wind') {
     const wind_stns = new Set()
-    for (let i = 0; i < PROCESS_LIMIT; i++) {
+    for (let i = 0; i < processLimit; i++) {
       const wind_stn_file = `${genFile}_${i}_wind_stns.txt`
       if (fs.existsSync(wind_stn_file)) {
         const wind_stns_used = fs.readFileSync(wind_stn_file, {encoding:'utf8', flag:'r'})
@@ -660,7 +598,7 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
     otherInfo.wind_stns = Array.from(wind_stns)
   }
   let compiledResult = []
-  for (let i = 0; i < PROCESS_LIMIT; i++) {
+  for (let i = 0; i < processLimit; i++) {
     try {
       const readfile = `${genFile}_${i}.txt`
       const fileresult = fs.readFileSync(readfile, {encoding:'utf8', flag:'r'})

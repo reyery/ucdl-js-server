@@ -251,6 +251,9 @@ async function run(type, filename) {
     }
 
     fs.writeFileSync(output_dir + outDir + filename, solar_model)
+
+    const tbd = sim.query.Get('pg', null);
+    sim.edit.Delete(tbd, 'delete_selected');
 }
 run(process.argv[2], process.argv[3])
 

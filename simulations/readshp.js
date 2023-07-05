@@ -42,6 +42,10 @@ async function writeModel(geom, coord) {
     mfn.edit.Delete(allPgons, 'delete_selected')
 
     const exportedString = (await mfn.io.ExportData(null, 'sim'));
+
+    const tbd = mfn.query.Get('pg', null);
+    mfn.edit.Delete(tbd, 'delete_selected');
+
     const coords = coord.split('__').map(x => Number(x))
     const coordStr = coords.map(fillString).join('_')
     console.log('writing', coordStr)
@@ -93,6 +97,9 @@ async function processData(geom, coord) {
     mfn.attrib.Set(pgon, 'type', 'site')
     mfn.attrib.Set(pgon, 'cluster', 0)
     const exportedString = (await mfn.io.ExportData(null, 'sim'));
+
+    const tbd = mfn.query.Get('pg', null);
+    mfn.edit.Delete(tbd, 'delete_selected');
     const coordStr = coords.map(fillString).join('_')
     fs.writeFileSync(process.cwd() + '/assets/simdata/data_' + coordStr + '.sim', exportedString);
 

@@ -1,34 +1,19 @@
+const { config } = require("./const");
+
 const GRID_SIZE = 10;
 // =================================================================================================
 // execute the modle generation
-async function execute(sim, config, gridSize = GRID_SIZE) {
-    // // initiate the function class
-    // const sim = new SIMFuncs();
-    // // import model data
-    // try {
-    //     sim.io.ImportData(model_data, 'sim');
-    // } catch(ex) {
-    //     if (typeof model_data !== 'string') {
-    //         console.log(model_data);
-    //     } else {
-    //         console.log(model_data.slice(0, 200));
-    //     }
-    //     throw(ex)
-    // }
-    // add an attribute for obstructiobs
-    // sim.attrib.Add('pg', 'boolean', 'obstruction');
-    // set geolocation
+async function execute(sim, gridSize) {
     sim.io.Geolocate([config["latitude"], config["longitude"]], 0, 0);
     // get all pg
     const pgons = sim.query.Get('pg', null);
     // update attributes and colours
     processSite(sim, pgons, gridSize);
-    processFacade(sim, pgons);
-    processObstructions(sim, pgons);
-    processWalkways(sim, pgons);
-    processOther(sim, pgons);
     // export sim model
     const new_model_data = await sim.io.ExportData(null, 'sim');
+    const tbd = sim.query.Get('pg', null);
+    sim.edit.Delete(tbd, 'delete_selected');
+    delete mfn
     return new_model_data;
 }
 // -------------------------------------------------------------------------------------------------
@@ -82,6 +67,26 @@ function processSite(sim, pgons, gridSize) {
         [num_edges[0] * gridSize, num_edges[1] * gridSize],
         [num_edges[0] + 1,         num_edges[1] + 1], 'quads');
     const grid_pgons0 = sim.make.Polygon(grid_posis);
+
+    // const grid_pgons2 = []
+    // for (const pgon_posis of grid_posis) {
+    //     const pgon = sim.make.Polygon(pgon_posis);
+    //     check = sim.poly2d.Relationship([pgon], site_off, 'touches');
+    //     if (check[0]) {
+    //         grid_pgons0.push(pgon)
+    //     } else {
+    //         sim.edit.Delete(pgon, 'delete_selected');
+    //     }
+    // }
+
+    // let grid_pgons2 = []
+    // console.log('~~~~~~~', grid_pgons2.length)
+    // for (const pgon of grid_pgons2) {
+    //     const result = sim.poly2d.Boolean(grid_pgons0, [pgon], 'intersect');
+    //     if (result.length > 0) {
+    //         grid_pgons2.push(result[0])
+    //     }
+    // }
     // intersect the grid with the site
     const grid_pgons2 = sim.poly2d.Boolean(grid_pgons0, site_off, 'intersect');
     // make sure that all resulting pgons are facing up

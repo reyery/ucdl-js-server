@@ -6,58 +6,29 @@ const sg_wind = require('./sg_wind_all.js').sg_wind;
 const sg_stn_data = require('./sg_wind_station_data.js').sg_wind_stn_data;
 const proj4 = require('proj4');
 const shapefile = require("shapefile");
+const { config } = require("./const.js");
 
 const solar_settings = {
     DETAIL: 1,
-    RADIUS: 1000,
+    RADIUS: 300,
     FACADE_MAX_VAL: 0.6945730087671974,
 }
 const sky_settings = { 
     DETAIL: 0,
-    RADIUS: 1000,
+    RADIUS: 300,
     FACADE_MAX_VAL: 0.5989617186548527
 }
 const uhi_settings = { 
     DETAIL: 0,
-    RADIUS: 1000
+    RADIUS: 300
 }
 const wind_settings = { 
-    NUM_RAYS: 4,
+    NUM_RAYS: 2,
     RADIUS: 200,
-    LAYERS: [1, 18, 4]
+    LAYERS: [1, 18, 10]
 }
 
 
-const config = {
-    "latitude":1.298759,
-    "longitude":103.778329,
-    "g_solar_min":0,
-    "g_solar_max":50,
-    "g_sky_min":50,
-    "g_sky_max":100,
-    "g_uhi_min":0,
-    "g_uhi_max":4,
-    "g_wind_min":60,
-    "g_wind_max":100,
-    "g_irr_min":0,
-    "g_irr_max":800,
-    "g_irr_rad_min":0,
-    "g_irr_rad_max":800,
-    "f_solar_min":0,
-    "f_solar_max":50,
-    "f_sky_min":50,
-    "f_sky_max":100,
-    "f_irr_min":0,
-    "f_irr_max":500,
-    "f_irr_rad_min":0,
-    "f_irr_rad_max":500,
-    "f_noise_min":0,
-    "f_noise_max":60,
-    "f_unob_min":80,
-    "f_unob_max":100,
-    "f_visib_min":0,
-    "f_visib_max":60,
-}
 
 const LONGLAT = [103.778329, 1.298759];
 const TILE_SIZE = 500;
@@ -360,6 +331,10 @@ async function simExecute(type, genFile, index, PROCESS_LIMIT, closest_stn_id) {
     if (result.wind_stations) {
         fs.writeFileSync(genFile + '_' + index + '_wind_stns.txt', result.wind_stations)
     }
+    const pgons = sim.query.Get('pg', null);
+    sim.edit.Delete(pgons, 'delete_selected');
+    delete sim
+    delete gen
     // const ground_pgons = sim.query.Filter(sim.query.Get('pg', null), 'type', '==', 'ground');
     // sim.modify.Move(ground_pgons, [-coords[0][0], -coords[0][1], 0])
     // sim.edit.Delete(ground_pgons, 'keep_selected')
