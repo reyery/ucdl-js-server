@@ -263,10 +263,11 @@ function logTime(starttime, simType, otherInfo = '') {
     const min = Math.floor(duration / 60)
     const sec = duration % 60
     fs.appendFileSync('log.txt', `${starttime.toLocaleString()}: ${otherInfo} - ${simType} ${min}m${sec}s\n`)
+    return `${min}m${sec}s`
   } else {
     fs.appendFileSync('log.txt', `${starttime.toLocaleString()}: ${otherInfo} - ${simType} ${duration}s\n`)
+    return ` ${duration}s`
   }
-  return `${min}m${sec}s`
 }
 
 app.post('/solar', async (req, res) => {
