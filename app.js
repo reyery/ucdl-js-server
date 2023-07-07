@@ -44,10 +44,10 @@ const bound = [
 const LONGLAT = [103.778329, 1.298759];
 const TILE_SIZE = 500;
 const RESOURCE_LIM_DICT = {
-  10: 30,
-  5: 40,
-  2: 60,
-  1: 60
+  10: 40,
+  5: 80,
+  2: 128,
+  1: 128
 }
 const SIM_DISTANCE_LIMIT_METER =  200
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
@@ -266,18 +266,20 @@ function logTime(starttime, simType, otherInfo = '') {
   } else {
     fs.appendFileSync('log.txt', `${starttime.toLocaleString()}: ${otherInfo} - ${simType} ${duration}s\n`)
   }
+  return `${min}m${sec}s`
 }
 
 app.post('/solar', async (req, res) => {
   try {
     const starttime = new Date()
     const [result, _] = await runJSSimulation(req.body, 'solar', session=req.body.session)
-    res.send({
-      result: result
-    })
     const origin = req.socket.remoteAddress;
+    const runtime = logTime(starttime, 'solar', origin)
 
-    logTime(starttime, 'solar', origin)
+    res.send({
+      result: result,
+      runtime: runtime
+    })
     return
   } catch (ex) {
     console.log('ERROR', ex)
@@ -291,12 +293,12 @@ app.post('/sky', async (req, res) => {
   try {
     const starttime = new Date()
     const [result, _] = await runJSSimulation(req.body, 'sky', session=req.body.session)
-    res.send({
-      result: result
-    })
     const origin = req.socket.remoteAddress;
-
-    logTime(starttime, 'solar', origin)
+    const runtime = logTime(starttime, 'sky', origin)
+    res.send({
+      result: result,
+      runtime: runtime
+    })
     return
   } catch (ex) {
     console.log('ERROR', ex)
@@ -310,12 +312,13 @@ app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
     const [result, otherInfo] = await runJSSimulation(req.body, 'wind', session=req.body.session)
+    const origin = req.socket.remoteAddress;
+    const runtime = logTime(starttime, 'wind', origin)
     res.send({
       result: result,
-      wind_stns: otherInfo.wind_stns
+      wind_stns: otherInfo.wind_stns,
+      runtime: runtime
     })
-    const origin = req.socket.remoteAddress;
-    logTime(starttime, 'wind', origin)
     return
   } catch (ex) {
     console.log('ERROR', ex)
@@ -619,13 +622,13 @@ app.post('/solar_upload', async (req, res) => {
   try {
     const starttime = new Date()
     const [result, surrounding, _] = await runUploadJSSimulation(req.body, 'solar', session=req.body.session)
+    const origin = req.socket.remoteAddress;
+    const runtime = logTime(starttime, 'solar', origin)
     res.send({
       result: result,
-      surrounding: surrounding
+      surrounding: surrounding,
+      runtime: runtime
     })
-    const origin = req.socket.remoteAddress;
-
-    logTime(starttime, 'solar', origin)
     return
   } catch (ex) {
     console.log('ERROR', ex)
@@ -640,13 +643,13 @@ app.post('/sky_upload', async (req, res) => {
   try {
     const starttime = new Date()
     const [result, surrounding, _] = await runUploadJSSimulation(req.body, 'sky', session=req.body.session, gridSize=10)
+    const origin = req.socket.remoteAddress;
+    const runtime = logTime(starttime, 'sky', origin)
     res.send({
       result: result,
-      surrounding: surrounding
+      surrounding: surrounding,
+      runtime: runtime
     })
-    const origin = req.socket.remoteAddress;
-
-    logTime(starttime, 'solar', origin)
     return
   } catch (ex) {
     console.log('ERROR', ex)
@@ -660,13 +663,14 @@ app.post('/wind_upload', async (req, res) => {
   try {
     const starttime = new Date()
     const [result, surrounding, otherInfo] = await runUploadJSSimulation(req.body, 'wind', session=req.body.session)
+    const origin = req.socket.remoteAddress;
+    const runtime = logTime(starttime, 'wind', origin)
     res.send({
       result: result,
       surrounding: surrounding,
-      wind_stns: otherInfo.wind_stns
+      wind_stns: otherInfo.wind_stns,
+      runtime: runtime
     })
-    const origin = req.socket.remoteAddress;
-    logTime(starttime, 'wind', origin)
     return
   } catch (ex) {
     console.log('ERROR', ex)
