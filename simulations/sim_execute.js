@@ -295,7 +295,6 @@ async function simExecute(type, obsFile, genFile, gridSize) {
     const siteCoordsText = fs.readFileSync(genFile, {encoding:'utf8', flag:'r'});
     const siteCoords = JSON.parse(siteCoordsText)
     addSite(sim, siteCoords, gridSize)
-    fs.writeFileSync('test/' + genFile.split('/file_')[1].split('_')[1] + '.sim', await sim.io.ExportData(null, 'sim'))
     let result
     if (type === 'solar') {
         // const col_range = [0, 100];
