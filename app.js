@@ -44,13 +44,14 @@ const bound = [
 const LONGLAT = [103.778329, 1.298759];
 const TILE_SIZE = 500;
 const RESOURCE_LIM_DICT = {
-  10: 40,
-  5: 80,
-  2: 128,
-  1: 128
+  10: 20,
+  5: 20,
+  2: 20,
+  1: 20
 }
 const SIM_DISTANCE_LIMIT_METER =  200
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
+const POOL = new Piscina({maxThreads: 20})
 
 
 function _createProjection() {
@@ -88,26 +89,23 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   const session = reqSession? reqSession : getSession()
   const boundary = reqBody.bounds
   const gridSize = reqBody.gridSize
-  const processLimit = RESOURCE_LIM_DICT[gridSize]
+  let processLimit = RESOURCE_LIM_DICT[gridSize]
   const otherInfo = {}
-  // const minCoord = [99999, 99999];
-  // const maxCoord = [-99999, -99999];
+  const limCoords = [99999, 99999, -99999, -99999];
   const limExt = [999, 999, -999, -999];
   const coords = []
   for (const latlong of boundary) {
     const coord = [...proj_obj.forward(latlong), 0]
-    // minCoord[0] = Math.min(coord[0], minCoord[0])
-    // minCoord[1] = Math.min(coord[1], minCoord[1])
-    // maxCoord[0] = Math.max(coord[0], maxCoord[0])
-    // maxCoord[1] = Math.max(coord[1], maxCoord[1])
+    limCoords[0] = Math.min(coord[0], limCoords[0])
+    limCoords[1] = Math.min(coord[1], limCoords[1])
+    limCoords[2] = Math.max(coord[0], limCoords[2])
+    limCoords[3] = Math.max(coord[1], limCoords[3])
     limExt[0] = Math.min(latlong[0], limExt[0])
     limExt[1] = Math.min(latlong[1], limExt[1])
     limExt[2] = Math.max(latlong[0], limExt[2])
     limExt[3] = Math.max(latlong[1], limExt[3])
     coords.push(coord)
   }
-
-  console.log('coords', coords)
 
   const mfn = new SIMFuncs();
   const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
@@ -119,6 +117,7 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
 
   console.log('limExt', limExt)
   // const surroundingBlks = []
+  const basePgons = []
   while (true) {
     const result = await shpFile.read()
     if (!result || result.done) { break; }
@@ -145,90 +144,88 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
 
     const ps = mfn.make.Position(pos)
     const pg = mfn.make.Polygon(ps)
-    const pgons = mfn.make.Extrude(pg, result.value.properties.AGL, 1, 'quads')
-    mfn.attrib.Set(pgons, 'cluster', 1)
-    mfn.attrib.Set(pgons, 'type', 'obstruction')
-    mfn.attrib.Set(pgons, 'obstruction', true)
-
+    mfn.make.Extrude(pg, result.value.properties.AGL, 1, 'quads')
+    basePgons.push(pg)
   }
-
+  mfn.edit.Delete(basePgons, 'delete_selected')
   const allObstructions = mfn.query.Get('pg', null)
   mfn.attrib.Set(allObstructions, 'cluster', 1)
   mfn.attrib.Set(allObstructions, 'type', 'obstruction')
   mfn.attrib.Set(allObstructions, 'obstruction', true)
+  mfn.attrib.Set(null, 'geolocation', {latitude: bound[0][0], longitude: bound[0][1]})
 
-  const pos = mfn.make.Position(coords)
-  const pgon = mfn.make.Polygon(pos)
-  
-  // const [cen, _, __, size] = mfn.calc.BBox(pgon);
-  // console.log('cen, _, __, size', cen, _, __, size)
-  mfn.attrib.Set(pgon, 'type', 'site')
-  mfn.attrib.Set(pgon, 'cluster', 0)
+  console.log('coords', coords)
+  const rows = Math.ceil((limCoords[3] - limCoords[1]) / gridSize)
+  const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize)
+  const total = rows * cols
+  if (total * 10 < processLimit) {
+    processLimit = total
+  }
+  const numCoordsPerThread = Math.ceil(total / processLimit)
+  console.log('rows, cols', rows, cols)
+  console.log('processLimit', processLimit)
+  console.log('numCoordsPerThread', numCoordsPerThread)
 
-  const gen = await generate(mfn, gridSize)
+  const options_gen = {filename: path.resolve("./", 'simulations/check_sim_area.js')}
+  const options_ex = {filename: path.resolve("./", 'simulations/sim_execute.js')}
+  let queues = []
+
+  for (let i = 0; i < processLimit; i++) {
+    const startNum = numCoordsPerThread * i
+    let endNum = numCoordsPerThread * (i + 1)
+    console.log(startNum)
+    console.log(endNum, total)
+    if (endNum > total) { endNum = total; }
+    const simCoords = []
+    for (let j = startNum; j < endNum; j++) {
+      const offsetX = j % cols
+      const offsetY = Math.floor(j / rows)
+      simCoords.push([limCoords[0] + offsetX * gridSize, limCoords[1] + offsetY * gridSize])
+    }
+    if (simCoords.length === 0) { continue }
+    queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}`)
+  }
+  const gen_result_queues = []
+  await Promise.all(queues.map(x => gen_result_queues.push(POOL.run(x, options_gen))))
+  let gen_result = []
+  let gen_result_index = []
+  for (const result_promise of gen_result_queues) {
+    const r = await result_promise
+    gen_result = gen_result.concat(r[0])
+    gen_result_index = gen_result_index.concat(r[1])
+  }
+  console.log('!!!!', gen_result_index)
+
+  queues = []
+
   fs.mkdirSync('temp/' + session)
-  const genFile = 'temp/' + session + '/file_' + session + '.sim'
+  const obsFile = 'temp/' + session + '/file_' + session + '.sim'
   console.log('writing file: file_' + session + '.sim')
-  fs.writeFileSync(genFile, gen)
+  fs.writeFileSync(obsFile, await mfn.io.ExportData(null, 'sim'))
   console.log('finished writing file')
   const pgons = mfn.query.Get('pg', null);
   mfn.edit.Delete(pgons, 'delete_selected');
   delete mfn
-  delete gen
 
-  let closest_stn = {id: 'S24', dist2: null}
-  if (simulationType === 'wind') {
-    for (const stn of sg_wind_stn_data) {
-        const distx = stn.coord[0] - coords[0][0]
-        const disty = stn.coord[1] - coords[0][1]
-        const dist2 = distx * distx + disty * disty
-        if (!closest_stn.dist2 || closest_stn.dist2 > dist2) {
-            closest_stn.id = stn.id
-            closest_stn.dist2 = dist2
-        }
-    }
+  if (gen_result.length < (processLimit * 10)) {
+    processLimit = Math.floor(gen_result.length / 10)
   }
-  const pool = new Piscina()
-  const options = {filename: path.resolve("./", 'simulations/sim_execute.js')}
-  const queues = []
+
   for (let i = 0; i < processLimit; i++) {
-    queues.push(`${simulationType} ${genFile} ${i} ${processLimit} ${closest_stn.id}`)
+    const fromIndex = Math.ceil(gen_result.length / processLimit) * i
+    let toIndex = Math.ceil(gen_result.length / processLimit) * (i + 1)
+    if (fromIndex >= gen_result.length) { break }
+    if (toIndex >= gen_result.length) { toIndex = gen_result.length }
+    const genFile = `temp/${session}/file_${session}_${i}`
+    const threadCoords = gen_result.slice(fromIndex, toIndex)
+    fs.writeFileSync(genFile, JSON.stringify(threadCoords))
+    queues.push(`${simulationType} ${obsFile} ${genFile} ${gridSize}`)
   }
-  await Promise.all(queues.map(x => pool.run(x, options)))
-  pool.destroy()
-
-  // for (let i = 0; i < processLimit; i++) {
-  //   const p = new Promise((resolve, reject) => {
-  //     try {
-  //       exec(`node simulations/sim_execute ${simulationType} ${genFile} ${i} ${processLimit} ${closest_stn.id}`,
-  //         (error, stdout, stderr) => {
-  //           if (error) {
-  //             console.log(`error: ${simulationType} ${i}\n`)
-  //             console.log(error)
-  //             // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-  //             //   if (err) throw err;
-  //             // });
-  //             reject(error);
-  //             return;
-  //           }
-  //           resolve(stdout)
-  //         })
-  //     } catch (ex) {
-  //       console.log(`error: ${simulationType} ${i}\n`)
-  //       console.log(ex)
-  //       // fs.appendFileSync('genScript/log.txt', `error: ${type} ${file}\n`, function (err) {
-  //       //   if (err) throw err;
-  //       // });
-  //     }
-  //   })
-  //   queues.push(p)
-  // }
-  // await Promise.all(queues)
-
+  await Promise.all(queues.map(x => POOL.run(x, options_ex)))
   if (simulationType === 'wind') {
     const wind_stns = new Set()
     for (let i = 0; i < processLimit; i++) {
-      const wind_stn_file = `${genFile}_${i}_wind_stns.txt`
+      const wind_stn_file = `temp/${session}/file_${session}_${i}_wind_stns.txt`
       if (fs.existsSync(wind_stn_file)) {
         const wind_stns_used = fs.readFileSync(wind_stn_file, {encoding:'utf8', flag:'r'})
         for (const stn of wind_stns_used.split(',')) {
@@ -241,7 +238,7 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   let compiledResult = []
   for (let i = 0; i < processLimit; i++) {
     try {
-      const readfile = `${genFile}_${i}.txt`
+      const readfile = `temp/${session}/file_${session}_${i}.txt`
       const fileresult = fs.readFileSync(readfile, {encoding:'utf8', flag:'r'})
       compiledResult.push(fileresult)
       fs.unlinkSync(readfile)
@@ -254,7 +251,43 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   fs.rmSync('temp/' + session, { recursive: true, force: true });
   const fullResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
   console.log(fullResult.length)
-  return [fullResult, otherInfo]
+  return [fullResult, gen_result_index, [cols, rows], otherInfo]
+
+  // for (let i = 0; i < processLimit; i++) {
+  //   queues.push(`${simulationType} ${genFile} ${i} ${processLimit}`)
+  // }
+  // await Promise.all(queues.map(x => POOL.run(x, options_ex)))
+
+  // if (simulationType === 'wind') {
+  //   const wind_stns = new Set()
+  //   for (let i = 0; i < processLimit; i++) {
+  //     const wind_stn_file = `${genFile}_${i}_wind_stns.txt`
+  //     if (fs.existsSync(wind_stn_file)) {
+  //       const wind_stns_used = fs.readFileSync(wind_stn_file, {encoding:'utf8', flag:'r'})
+  //       for (const stn of wind_stns_used.split(',')) {
+  //         wind_stns.add(stn.trim())
+  //       }
+  //     }
+  //   }
+  //   otherInfo.wind_stns = Array.from(wind_stns)
+  // }
+  // let compiledResult = []
+  // for (let i = 0; i < processLimit; i++) {
+  //   try {
+  //     const readfile = `${genFile}_${i}.txt`
+  //     const fileresult = fs.readFileSync(readfile, {encoding:'utf8', flag:'r'})
+  //     compiledResult.push(fileresult)
+  //     fs.unlinkSync(readfile)
+  //   } catch (ex) {
+  //     console.log('!!ERROR!! at index', i)
+  //     console.log('!!ERROR!!:', ex)
+  //   }
+  // }
+  // console.log('deleting file: file_' + session + '.sim')
+  // fs.rmSync('temp/' + session, { recursive: true, force: true });
+  // const fullResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
+  // console.log(fullResult.length)
+  // return [fullResult, otherInfo]
 }
 
 function logTime(starttime, simType, otherInfo = '') {
@@ -273,12 +306,14 @@ function logTime(starttime, simType, otherInfo = '') {
 app.post('/solar', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, _] = await runJSSimulation(req.body, 'solar', session=req.body.session)
+    const [result, resultIndex, dimension, _] = await runJSSimulation(req.body, 'solar', session=req.body.session)
     const origin = req.socket.remoteAddress;
     const runtime = logTime(starttime, 'solar', origin)
 
     res.send({
       result: result,
+      resultIndex: resultIndex,
+      dimension: dimension,
       runtime: runtime
     })
     return
@@ -293,11 +328,13 @@ app.post('/solar', async (req, res) => {
 app.post('/sky', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, _] = await runJSSimulation(req.body, 'sky', session=req.body.session)
+    const [result, resultIndex, dimension, _] = await runJSSimulation(req.body, 'sky', session=req.body.session)
     const origin = req.socket.remoteAddress;
     const runtime = logTime(starttime, 'sky', origin)
     res.send({
       result: result,
+      resultIndex: resultIndex,
+      dimension: dimension,
       runtime: runtime
     })
     return
@@ -312,11 +349,13 @@ app.post('/sky', async (req, res) => {
 app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, otherInfo] = await runJSSimulation(req.body, 'wind', session=req.body.session)
+    const [result, resultIndex, dimension, otherInfo] = await runJSSimulation(req.body, 'wind', session=req.body.session)
     const origin = req.socket.remoteAddress;
     const runtime = logTime(starttime, 'wind', origin)
     res.send({
       result: result,
+      resultIndex: resultIndex,
+      dimension: dimension,
       wind_stns: otherInfo.wind_stns,
       runtime: runtime
     })
@@ -579,14 +618,12 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession=null) {
 
   console.log('start running!!')
 
-  const pool = new Piscina()
   const options = {filename: path.resolve("./", 'simulations/sim_execute.js')}
   const queues = []
   for (let i = 0; i < processLimit; i++) {
     queues.push(`${simulationType} ${genFile} ${i} ${processLimit} ${closest_stn.id}`)
   }
-  await Promise.all(queues.map(x => pool.run(x, options)))
-  pool.destroy()
+  await Promise.all(queues.map(x => POOL.run(x, options)))
 
   if (simulationType === 'wind') {
     const wind_stns = new Set()
