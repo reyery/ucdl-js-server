@@ -154,7 +154,10 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   mfn.attrib.Set(allObstructions, 'obstruction', true)
   mfn.attrib.Set(null, 'geolocation', {latitude: bound[0][0], longitude: bound[0][1]})
 
+  console.log('limCoords', limCoords)
   console.log('coords', coords)
+  console.log('width, height', limCoords[3] - limCoords[1], limCoords[2] - limCoords[0])
+  console.log('rows, cols', (limCoords[3] - limCoords[1]) / gridSize, (limCoords[2] - limCoords[0]) / gridSize)
   const rows = Math.ceil((limCoords[3] - limCoords[1]) / gridSize)
   const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize)
   const total = rows * cols
@@ -173,16 +176,15 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   for (let i = 0; i < processLimit; i++) {
     const startNum = numCoordsPerThread * i
     let endNum = numCoordsPerThread * (i + 1)
-    console.log(startNum)
-    console.log(endNum, total)
     if (endNum > total) { endNum = total; }
     const simCoords = []
     for (let j = startNum; j < endNum; j++) {
       const offsetX = j % cols
-      const offsetY = Math.floor(j / rows)
+      const offsetY = Math.floor(j / cols)
       simCoords.push([limCoords[0] + offsetX * gridSize, limCoords[1] + offsetY * gridSize])
     }
     if (simCoords.length === 0) { continue }
+    console.log(simCoords[0], simCoords[simCoords.length - 1])
     queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}`)
   }
   const gen_result_queues = []
@@ -194,7 +196,6 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
     gen_result = gen_result.concat(r[0])
     gen_result_index = gen_result_index.concat(r[1])
   }
-  console.log('!!!!', gen_result_index)
 
   queues = []
 
@@ -207,10 +208,12 @@ async function runJSSimulation(reqBody, simulationType, reqSession=null) {
   mfn.edit.Delete(pgons, 'delete_selected');
   delete mfn
 
+  console.log('gen_result.length', gen_result.length)
   if (gen_result.length < (processLimit * 10)) {
     processLimit = Math.floor(gen_result.length / 10)
+  } else if ((gen_result.length / 1000) > processLimit) {
+    processLimit = Math.ceil(gen_result.length / 1000)
   }
-
   for (let i = 0; i < processLimit; i++) {
     const fromIndex = Math.ceil(gen_result.length / processLimit) * i
     let toIndex = Math.ceil(gen_result.length / processLimit) * (i + 1)
