@@ -23,7 +23,7 @@ const uhi_settings = {
     RADIUS: 300
 }
 const wind_settings = { 
-    NUM_RAYS: 4,
+    NUM_RAYS: 2,
     RADIUS: 200,
     LAYERS: [1, 18, 4]
 }
@@ -65,14 +65,6 @@ function eval_solar(sim) {
     // run simulation after sim
     const sim_name = 'Solar Exposure (ground)';
     shared.checkErrorBeforSim(sim_name, sens_rays, obs_pgons);
-
-    // let data = {exposure: []}
-    // fs.writeFileSync(gen_file + '_progress', '0 ' + sens_rays.length)
-    // for (let i = 0; i < sens_rays.length; i ++) {
-    //     const result = sim.analyze.Sun([sens_rays[i]], obs_pgons, settings.RADIUS, settings.DETAIL,'direct_weighted');
-    //     data.exposure.push(result.exposure[0])
-    //     fs.writeFileSync(gen_file + '_progress', (i + 1) + ' ' + sens_rays.length)
-    // }
     
     const data = sim.analyze.Sun(sens_rays, obs_pgons, settings.RADIUS, settings.DETAIL,'direct_weighted');
     const max_val = 1;

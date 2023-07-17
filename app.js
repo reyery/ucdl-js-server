@@ -14,10 +14,20 @@ const { Piscina } = require('piscina');
 const { config } = require('./simulations/const');
 
 const cluster = require("cluster");
+const os = require('os');
+
+const systemCpuCores = os.cpus();
+const POOL_SETTINGS = {
+  // minThreads: 5,
+  // maxThreads: systemCpuCores.length,
+  idleTimeout: 60000
+}
+let POOL = new Piscina(POOL_SETTINGS)
+const TILES_PER_WORKER = 500
 
 if (cluster.isMaster) {
   // Fork workers.
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 3; i++) {
     cluster.fork();
   }
 
@@ -65,8 +75,6 @@ if (cluster.isMaster) {
   }
   const SIM_DISTANCE_LIMIT_METER = 300
   const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
-  const POOL = new Piscina({ maxThreads: 128 })
-
 
   function _createProjection() {
     // create the function for transformation
@@ -227,13 +235,16 @@ if (cluster.isMaster) {
     console.log('gen_result.length', gen_result.length)
     if (gen_result.length < (processLimit * 10)) {
       processLimit = Math.floor(gen_result.length / 10)
-    } else if ((gen_result.length / 1000) > processLimit) {
-      processLimit = Math.ceil(gen_result.length / 1000)
+    } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
+      processLimit = Math.ceil(gen_result.length / TILES_PER_WORKER)
     }
     for (let i = 0; i < processLimit; i++) {
       const fromIndex = Math.ceil(gen_result.length / processLimit) * i
       let toIndex = Math.ceil(gen_result.length / processLimit) * (i + 1)
-      if (fromIndex >= gen_result.length) { break }
+      if (fromIndex >= gen_result.length) {
+        processLimit = i
+        break
+      }
       if (toIndex >= gen_result.length) { toIndex = gen_result.length }
       const genFile = `temp/${session}/file_${session}_${i}`
       const threadCoords = gen_result.slice(fromIndex, toIndex)
@@ -636,8 +647,8 @@ if (cluster.isMaster) {
     console.log('gen_result.length', gen_result.length)
     if (gen_result.length < (processLimit * 10)) {
       processLimit = Math.floor(gen_result.length / 10)
-    } else if ((gen_result.length / 1000) > processLimit) {
-      processLimit = Math.ceil(gen_result.length / 1000)
+    } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
+      processLimit = Math.ceil(gen_result.length / TILES_PER_WORKER)
     }
     for (let i = 0; i < processLimit; i++) {
       const fromIndex = Math.ceil(gen_result.length / processLimit) * i

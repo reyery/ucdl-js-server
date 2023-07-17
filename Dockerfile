@@ -7,4 +7,4 @@ RUN npm ci
 
 EXPOSE 5202
 
-CMD [ "node", "--max-old-space-size=256000 app.js" ]
+CMD [ "node", "--max-old-space-size=262144 app.js" ]
