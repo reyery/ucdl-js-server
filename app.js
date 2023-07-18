@@ -120,12 +120,11 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   const mfn = new SIMFuncs();
   const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
 
-  limExt[0] -= SIM_DISTANCE_LIMIT_LATLONG,
-    limExt[1] -= SIM_DISTANCE_LIMIT_LATLONG,
-    limExt[0] += SIM_DISTANCE_LIMIT_LATLONG,
-    limExt[1] += SIM_DISTANCE_LIMIT_LATLONG,
+  limExt[0] -= SIM_DISTANCE_LIMIT_LATLONG
+  limExt[1] -= SIM_DISTANCE_LIMIT_LATLONG
+  limExt[2] += SIM_DISTANCE_LIMIT_LATLONG
+  limExt[3] += SIM_DISTANCE_LIMIT_LATLONG
 
-    console.log('limExt', limExt)
   // const surroundingBlks = []
   const basePgons = []
   while (true) {
@@ -158,16 +157,23 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
     basePgons.push(pg)
   }
   mfn.edit.Delete(basePgons, 'delete_selected')
-  const allObstructions = mfn.query.Get('pg', null)
+
+  let allObstructions = mfn.query.Get('pg', null)
+  if (allObstructions.length === 0) {
+    const dummyps = mfn.make.Position([[0, 0, -1], [2, 0, -1], [0, 2, -1]])
+    const dummypg = mfn.make.Polygon(dummyps)  
+    allObstructions = [dummypg]
+  }
+
   mfn.attrib.Set(allObstructions, 'cluster', 1)
   mfn.attrib.Set(allObstructions, 'type', 'obstruction')
   mfn.attrib.Set(allObstructions, 'obstruction', true)
   mfn.io.Geolocate([config["latitude"], config["longitude"]], 0, 0);
 
-  console.log('limCoords', limCoords)
-  console.log('coords', coords)
-  console.log('width, height', limCoords[3] - limCoords[1], limCoords[2] - limCoords[0])
-  console.log('rows, cols', (limCoords[3] - limCoords[1]) / gridSize, (limCoords[2] - limCoords[0]) / gridSize)
+  // console.log('limCoords', limCoords)
+  // console.log('coords', coords)
+  // console.log('width, height', limCoords[3] - limCoords[1], limCoords[2] - limCoords[0])
+  // console.log('rows, cols', (limCoords[3] - limCoords[1]) / gridSize, (limCoords[2] - limCoords[0]) / gridSize)
   const rows = Math.ceil((limCoords[3] - limCoords[1]) / gridSize)
   const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize)
   const total = rows * cols
@@ -177,9 +183,9 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
     processLimit = Math.ceil(total / 10000)
   }
   const numCoordsPerThread = Math.ceil(total / processLimit)
-  console.log('rows, cols', rows, cols)
-  console.log('processLimit', processLimit)
-  console.log('numCoordsPerThread', numCoordsPerThread)
+  // console.log('rows, cols', rows, cols)
+  // console.log('processLimit', processLimit)
+  // console.log('numCoordsPerThread', numCoordsPerThread)
 
   const options_gen = { filename: path.resolve("./", 'simulations/check_sim_area.js') }
   const options_ex = { filename: path.resolve("./", 'simulations/sim_execute.js') }
@@ -196,7 +202,6 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
       simCoords.push([limCoords[0] + offsetX * gridSize, limCoords[1] + offsetY * gridSize])
     }
     if (simCoords.length === 0) { continue }
-    console.log(simCoords[0], simCoords[simCoords.length - 1])
     queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}`)
   }
   const gen_result_queues = []
@@ -220,7 +225,6 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   mfn.edit.Delete(pgons, 'delete_selected');
   delete mfn
 
-  console.log('gen_result.length', gen_result.length)
   if (gen_result.length < (processLimit * 10)) {
     processLimit = Math.floor(gen_result.length / 10)
   } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
@@ -268,7 +272,6 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   console.log('deleting file: file_' + session + '.sim')
   fs.rmSync('temp/' + session, { recursive: true, force: true });
   const fullResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
-  console.log(fullResult.length)
   return [fullResult, gen_result_index, [cols, rows], otherInfo]
 }
 
@@ -482,7 +485,12 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession = null)
   const mfn = new SIMFuncs();
   await mfn.io.ImportData(data, 'sim');
 
-  const allObstructions = mfn.query.Get('pg', null)
+  let allObstructions = mfn.query.Get('pg', null)
+  if (allObstructions.length === 0) {
+    const dummyps = mfn.make.Position([[0, 0, -1], [2, 0, -1], [0, 2, -1]])
+    const dummypg = mfn.make.Polygon(dummyps)  
+    allObstructions = [dummypg]
+  }
   mfn.attrib.Set(allObstructions, 'cluster', 1)
   mfn.attrib.Set(allObstructions, 'type', 'obstruction')
   mfn.attrib.Set(allObstructions, 'obstruction', true)
@@ -576,10 +584,10 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession = null)
   }
   mfn.io.Geolocate([config["latitude"], config["longitude"]], 0, 0);
 
-  console.log('limCoords', limCoords)
-  console.log('coords', coords)
-  console.log('width, height', limCoords[3] - limCoords[1], limCoords[2] - limCoords[0])
-  console.log('rows, cols', (limCoords[3] - limCoords[1]) / gridSize, (limCoords[2] - limCoords[0]) / gridSize)
+  // console.log('limCoords', limCoords)
+  // console.log('coords', coords)
+  // console.log('width, height', limCoords[3] - limCoords[1], limCoords[2] - limCoords[0])
+  // console.log('rows, cols', (limCoords[3] - limCoords[1]) / gridSize, (limCoords[2] - limCoords[0]) / gridSize)
   const rows = Math.ceil((limCoords[3] - limCoords[1]) / gridSize)
   const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize)
   const total = rows * cols
@@ -589,9 +597,9 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession = null)
     processLimit = Math.ceil(total / 10000)
   }
   const numCoordsPerThread = Math.ceil(total / processLimit)
-  console.log('rows, cols', rows, cols)
-  console.log('processLimit', processLimit)
-  console.log('numCoordsPerThread', numCoordsPerThread)
+  // console.log('rows, cols', rows, cols)
+  // console.log('processLimit', processLimit)
+  // console.log('numCoordsPerThread', numCoordsPerThread)
 
   const options_gen = { filename: path.resolve("./", 'simulations/check_sim_area.js') }
   const options_ex = { filename: path.resolve("./", 'simulations/sim_execute.js') }
@@ -608,7 +616,6 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession = null)
       simCoords.push([limCoords[0] + offsetX * gridSize, limCoords[1] + offsetY * gridSize])
     }
     if (simCoords.length === 0) { continue }
-    console.log(simCoords[0], simCoords[simCoords.length - 1])
     queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}`)
   }
   const gen_result_queues = []
@@ -632,7 +639,6 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession = null)
   mfn.edit.Delete(pgons, 'delete_selected');
   delete mfn
 
-  console.log('gen_result.length', gen_result.length)
   if (gen_result.length < (processLimit * 10)) {
     processLimit = Math.floor(gen_result.length / 10)
   } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
