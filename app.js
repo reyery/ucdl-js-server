@@ -14,12 +14,12 @@ const { Piscina } = require('piscina');
 const { config } = require('./simulations/const');
 
 // const cluster = require("cluster");
-// const os = require('os');
+const os = require('os');
 
-// const systemCpuCores = os.cpus();
+const systemCpuCores = os.cpus();
 const POOL_SETTINGS = {
   // minThreads: 5,
-  // maxThreads: 64,
+  maxThreads: 64,
   idleTimeout: 60000
 }
 let POOL = new Piscina(POOL_SETTINGS)
@@ -299,7 +299,10 @@ app.post('/solar', async (req, res) => {
       result: result,
       resultIndex: resultIndex,
       dimension: dimension,
-      runtime: runtime
+      runtime: runtime,
+      debugInfo: {
+        cpus: systemCpuCores.length
+      }
     })
     return
   } catch (ex) {
@@ -320,7 +323,7 @@ app.post('/sky', async (req, res) => {
       result: result,
       resultIndex: resultIndex,
       dimension: dimension,
-      runtime: runtime
+      runtime: runtime,
     })
     return
   } catch (ex) {
