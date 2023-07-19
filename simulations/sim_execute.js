@@ -23,9 +23,9 @@ const uhi_settings = {
     RADIUS: 300
 }
 const wind_settings = { 
-    NUM_RAYS: 3,
+    NUM_RAYS: 4,
     RADIUS: 200,
-    LAYERS: [1, 18, 5]
+    LAYERS: [1, 18, 4]
 }
 
 
