@@ -10,6 +10,7 @@ function preprocessFn(list, halfGridSize = null) {
         return
     } else {
         for (let i = 0; i < list.length; i++) {
+            if (list[i] === null) { continue }
             if (halfGridSize) {
                 list[i] = list[i] + halfGridSize
             }
@@ -20,12 +21,19 @@ function preprocessFn(list, halfGridSize = null) {
 function check_sim(bound_coords, sim_coord_list1, sim_coord_list2, halfGridSize, offset_index) {
     preprocessFn(bound_coords)
     preprocessFn(sim_coord_list2, halfGridSize)
-    const boundClipper = new Shape([bound_coords.map(coord => {return {X: coord[0], Y: coord[1]}})])
+    let boundClipper = new Shape([bound_coords.map(coord => {return {X: coord[0], Y: coord[1]}})])
     boundClipper.fixOrientation()
+    boundClipper = boundClipper.offset(halfGridSize * SCALE, {
+        jointType: 'jtSquare',
+        endType: 'etClosedPolygon',
+        miterLimit: 0,
+        roundPrecision: 0.25
+    })
     const result = []
     const result_index = []
     for (let i = 0; i < sim_coord_list2.length; i++) {
         const coord = sim_coord_list2[i]
+        if (coord[0] === null) { continue } 
         const check = boundClipper.pointInShape( { X: coord[0], Y: coord[1] }, false, false)
         if (check) {
             result.push(sim_coord_list1[i])
