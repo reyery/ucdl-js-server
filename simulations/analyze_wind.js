@@ -19,8 +19,8 @@ for (let i = 0; i < 16; i++) {
     cs = Math.cos(angle);
     sn = Math.sin(angle);
 
-    x = sn * 0.5;
-    y = cs * 0.5;
+    const x = sn * 0.5;
+    const y = cs * 0.5;
     WIND_DIR_VECS.push([x,y])
 }
 const MIN_WIND_DIST = 10 / 0.5
