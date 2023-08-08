@@ -11,6 +11,7 @@ const fs = require('fs');
 const { sg_wind_stn_data } = require('./simulations/sg_wind_station_data');
 const { Piscina } = require('piscina');
 const { config } = require('./simulations/const');
+const { runRasterSimulation } = require('./sim_raster');
 
 // const cluster = require("cluster");
 const os = require('os');
@@ -66,10 +67,6 @@ const RESOURCE_LIM_DICT = {
 }
 const SIM_DISTANCE_LIMIT_METER = 350
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
-
-const SIM_RASTERS = {
-  wind: 'assets/FA/FA.tif'
-}
 
 function _createProjection() {
   // create the function for transformation
@@ -390,9 +387,6 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   return [simResult.concat(cached_result), gen_result_index.concat(cached_result_index), [cols, rows], otherInfo]
 }
 
-async function runRasterSimulation(reqBody, simulationType, reqSession = null) {
-
-}
 
 function logTime(starttime, simType, otherInfo = '') {
   const duration = Math.round((new Date() - starttime) / 1000)
@@ -456,7 +450,8 @@ app.post('/sky', async (req, res) => {
 app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, resultIndex, dimension, otherInfo] = await runJSSimulation(req.body, 'wind', session = req.body.session)
+    console.log('!!!!!!')
+    const [result, resultIndex, dimension, otherInfo] = await runRasterSimulation(POOL, req.body, 'wind', session = req.body.session)
     const origin = req.socket.remoteAddress;
     const runtime = logTime(starttime, 'wind', origin)
     res.send({
