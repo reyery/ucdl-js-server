@@ -246,15 +246,15 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
       cachedCoord.push((xcoord - cachedCoord[0]) / gridSize)
       cachedCoord.push((ycoord - cachedCoord[1]) / gridSize)
       const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
-      // if (cachedResultMatch && cachedResultMatch[cachedCoord[2]][cachedCoord[3]]) {
-      //   simCoords.push([null, null])
-      //   cachedCoords.push([xcoord, ycoord, cachedResultMatch[cachedCoord[2]][cachedCoord[3]]])
-      // } else {
-      //   simCoords.push([xcoord, ycoord])
-      //   cachedCoords.push([null, null])
-      // }
-      simCoords.push([xcoord, ycoord])
-      cachedCoords.push([null, null])
+      if (cachedResultMatch && (cachedResultMatch[cachedCoord[2]][cachedCoord[3]] || cachedResultMatch[cachedCoord[2]][cachedCoord[3]] === 0)) {
+        simCoords.push([null, null])
+        cachedCoords.push([xcoord, ycoord, cachedResultMatch[cachedCoord[2]][cachedCoord[3]]])
+      } else {
+        simCoords.push([xcoord, ycoord])
+        cachedCoords.push([null, null])
+      }
+      // simCoords.push([xcoord, ycoord])
+      // cachedCoords.push([null, null])
     }
     if (simCoords.length > 0) {
       queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}|||true`)
@@ -363,7 +363,6 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   }
   console.log('deleting file: file_' + session + '.sim')
   fs.rmSync('temp/' + session, { recursive: true, force: true });
-  console.log(compiledResult)
   const simResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
   for (let i = 0; i < simResult.length; i++) {
     const offsetX = gen_result_index[i] % cols
@@ -451,13 +450,14 @@ app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
     console.log('!!!!!!')
-    const [result, resultIndex, dimension, otherInfo] = await runRasterSimulation(POOL, req.body, 'wind', session = req.body.session)
+    const [result, resultIndex, dimension, extent, otherInfo] = await runRasterSimulation(POOL, req.body, 'wind', session = req.body.session)
     const origin = req.socket.remoteAddress;
     const runtime = logTime(starttime, 'wind', origin)
     res.send({
       result: result,
       resultIndex: resultIndex,
       dimension: dimension,
+      extent: extent,
       wind_stns: otherInfo.wind_stns,
       runtime: runtime
     })

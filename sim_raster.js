@@ -20,6 +20,14 @@ const WIND_CLIP_URL = 'http://172.26.51.153:5000' + '/wind_clip'
 const TILES_PER_WORKER = 500
 const NUM_TILES_PER_CACHE_FILE = 200
 
+const OPTIONS_GEN = { filename: path.resolve("./", 'simulations/check_sim_area.js') }
+const OPTIONS_EX = { filename: path.resolve("./", 'simulations_raster/wind.js') }
+
+
+function getSession() {
+  return 's' + (new Date()).getTime()
+}
+
 function _createProjection() {
     const proj_from_str = 'WGS84';
     const proj_to_str = '+proj=tmerc +lat_0=1.36666666666667 +lon_0=103.833333333333 ' + 
@@ -44,19 +52,57 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
         fa_bottom_left, sim_bottom_left, 
         transf_bound,
         extent, proj, nodata, success} = p;
+    const fa_str = JSON.stringify(fa_mask_result)
+    const bd_str = JSON.stringify(bd_mask_result)
+    const sim_str = JSON.stringify(sim_mask_result)
+    const fa_bottom_left_str = JSON.stringify(fa_bottom_left)
+    const sim_bottom_left_str = JSON.stringify(extent)
+    const bottom_left_lat_long = proj_obj.inverse([extent[0], extent[1]])
+    const bottom_left = [extent[0], extent[1], bottom_left_lat_long[0], bottom_left_lat_long[1]]
     if (!success) { 
         console.log('clipping failed')
         return [[], [], [0,0,0,0], {}]
     }
-    if (!fs.existsSync(`temp/${session}`)) {
-        fs.mkdirSync(`temp/${session}`)
+
+    const cacheDist = NUM_TILES_PER_CACHE_FILE * gridSize
+    const cachedResultRange = [
+      Math.floor(extent[0] / cacheDist) * cacheDist,
+      Math.floor(extent[1] / cacheDist) * cacheDist,
+      Math.floor(extent[2] / cacheDist) * cacheDist,
+      Math.floor(extent[3] / cacheDist) * cacheDist,
+    ]
+    const cachedResult = {}
+    for (let x = cachedResultRange[0]; x <= cachedResultRange[2]; x += cacheDist) {
+      for (let y = cachedResultRange[1]; y <= cachedResultRange[3]; y += cacheDist) {
+        // cachedResult[`${x}_${y}`] = []
+        // for (let i = 0; i < NUM_TILES_PER_CACHE_FILE; i++) {
+        //   const col = []
+        //   for (let j = 0; j < NUM_TILES_PER_CACHE_FILE; j++) {
+        //     col.push(null)
+        //   }
+        //   cachedResult[`${x}_${y}`].push(col)
+        // }
+
+        const fileName = `result/${simulationType}_${gridSize}_${x}_${y}`
+        if (!fs.existsSync(fileName)) {
+          cachedResult[`${x}_${y}`] = []
+          for (let i = 0; i < NUM_TILES_PER_CACHE_FILE; i++) {
+            const col = []
+            for (let j = 0; j < NUM_TILES_PER_CACHE_FILE; j++) {
+              col.push(null)
+            }
+            cachedResult[`${x}_${y}`].push(col)
+          }
+        } else {
+          const cachedResultText = fs.readFileSync(fileName, {encoding: 'utf8'})
+          cachedResult[`${x}_${y}`] = JSON.parse(cachedResultText)
+        }
+      }
     }
-    const dataFiles = ['fa_mask_result', 'bd_mask_result', 'sim_mask_result', 'fa_affine_transf', 'sim_affine_transf']
-    dataFiles.forEach(filename => {
-        fs.writeFileSync(`temp/${session}/${filename}`, JSON.stringify(p[filename]))
-    })
-    const rows = sim_mask_result.length
-    const cols = sim_mask_result[0].length
+      
+
+    const rows = Math.ceil(sim_mask_result.length / gridSize)
+    const cols = Math.ceil(sim_mask_result[0].length / gridSize)
     const total = rows * cols
 
     let processLimit = 200
@@ -67,7 +113,6 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
       processLimit = Math.ceil(total / 10000)
     }
     const numCoordsPerThread = Math.ceil(total / processLimit)
-    const options_gen = { filename: path.resolve("./", 'simulations/check_sim_area.js') }
     let queues = []
     let cachedQueues = []
   
@@ -80,34 +125,35 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
       for (let j = startNum; j < endNum; j++) {
         const offsetX = j % cols
         const offsetY = Math.floor(j / cols)
-        const xcoord = sim_bottom_left[0] + offsetX * gridSize
-        const ycoord = sim_bottom_left[1] - offsetY * gridSize
-        // const cachedCoord = [
-        //   Math.floor(xcoord / cacheDist) * cacheDist,
-        //   Math.floor(ycoord / cacheDist) * cacheDist,
-        // ]
-        // cachedCoord.push((xcoord - cachedCoord[0]) / gridSize)
-        // cachedCoord.push((ycoord - cachedCoord[1]) / gridSize)
-        // const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
-        // if (cachedResultMatch && cachedResultMatch[cachedCoord[2]][cachedCoord[3]]) {
-        //   simCoords.push([null, null])
-        //   cachedCoords.push([xcoord, ycoord, cachedResultMatch[cachedCoord[2]][cachedCoord[3]]])
-        // } else {
-        //   simCoords.push([xcoord, ycoord])
-        //   cachedCoords.push([null, null])
-        // }
-        simCoords.push([xcoord, ycoord])
-        cachedCoords.push([null, null])
+        const xcoord = extent[0] + offsetX * gridSize
+        const ycoord = extent[1] + offsetY * gridSize
+        const cachedCoord = [
+          Math.floor(xcoord / cacheDist) * cacheDist,
+          Math.floor(ycoord / cacheDist) * cacheDist,
+        ]
+        cachedCoord.push(Math.floor((xcoord - cachedCoord[0]) / gridSize))
+        cachedCoord.push(Math.floor((ycoord - cachedCoord[1]) / gridSize))
+        const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
+        if (cachedResultMatch && (cachedResultMatch[cachedCoord[2]][cachedCoord[3]] || cachedResultMatch[cachedCoord[2]][cachedCoord[3]] === 0)) {
+          simCoords.push([null, null])
+          cachedCoords.push([xcoord, ycoord, cachedResultMatch[cachedCoord[2]][cachedCoord[3]]])
+        } else {
+          simCoords.push([xcoord, ycoord])
+          cachedCoords.push([null, null])
+        }
+        // simCoords.push([xcoord, ycoord])
+        // cachedCoords.push([null, null])
+
       }
       if (simCoords.length > 0) {
         queues.push(`${JSON.stringify(transf_bound)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}|||true`)
       }
-    //   if (cachedCoords.length > 0) {
-    //     cachedQueues.push(`${JSON.stringify(coords)}|||${JSON.stringify(cachedCoords)}|||${gridSize}|||${startNum}|||true`)
-    //   }
+      if (cachedCoords.length > 0) {
+        cachedQueues.push(`${JSON.stringify(transf_bound)}|||${JSON.stringify(cachedCoords)}|||${gridSize}|||${startNum}|||true`)
+      }
     }
     const gen_result_queues = []
-    await Promise.all(queues.map(x => gen_result_queues.push(POOL.run(x, options_gen))))
+    await Promise.all(queues.map(x => gen_result_queues.push(POOL.run(x, OPTIONS_GEN))))
     let gen_result = []
     let gen_result_index = []
     for (const result_promise of gen_result_queues) {
@@ -115,58 +161,66 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
       gen_result = gen_result.concat(r[0])
       gen_result_index = gen_result_index.concat(r[1])
     }
-    
+    const cached_result_queues = []
+    await Promise.all(cachedQueues.map(x => cached_result_queues.push(POOL.run(x, OPTIONS_GEN))))
+    let cached_result = []
+    let cached_result_index = []
+    for (const result_promise of cached_result_queues) {
+      const r = await result_promise
+      cached_result = cached_result.concat(r[0].map(c => c[2]))
+      cached_result_index = cached_result_index.concat(r[1])
+    }
+  
     if (gen_result.length < (processLimit * 10)) {
         processLimit = Math.floor(gen_result.length / 10)
     } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
         processLimit = Math.ceil(gen_result.length / TILES_PER_WORKER)
     }
-    // for (let i = 0; i < processLimit; i++) {
-    //     const fromIndex = Math.ceil(gen_result.length / processLimit) * i
-    //     let toIndex = Math.ceil(gen_result.length / processLimit) * (i + 1)
-    //     if (fromIndex >= gen_result.length) {
-    //       processLimit = i
-    //       break
-    //     }
-    //     if (toIndex >= gen_result.length) { toIndex = gen_result.length }
-    //     const genFile = `temp/${session}/file_${session}_${i}`
-    //     const threadCoords = gen_result.slice(fromIndex, toIndex)
-    //     fs.writeFileSync(genFile, JSON.stringify(threadCoords))
-    //     queues.push(`${simulationType} ${obsFile} ${genFile} ${gridSize}`)
-    // }
-    // await Promise.all(queues.map(x => POOL.run(x, options_ex)))
-    
-    
-    return [[], [], [0,0,0,0], {}]
-    // const gridSize = reqBody.gridSize
-    // let processLimit = RESOURCE_LIM_DICT[gridSize]
-    // const otherInfo = {}
-    // const limCoords = [99999, 99999, -99999, -99999];
-    // const limExt = [999, 999, -999, -999];
-    // const coords = []
-    // for (const latlong of boundary) {
-    //   const coord = [...proj_obj.forward(latlong), 0]
-    //   limCoords[0] = Math.min(Math.floor(coord[0] / gridSize) * gridSize, limCoords[0])
-    //   limCoords[1] = Math.min(Math.floor(coord[1] / gridSize) * gridSize, limCoords[1])
-    //   limCoords[2] = Math.max(Math.ceil(coord[0] / gridSize) * gridSize, limCoords[2])
-    //   limCoords[3] = Math.max(Math.ceil(coord[1] / gridSize) * gridSize, limCoords[3])
-    //   limExt[0] = Math.min(latlong[0], limExt[0])
-    //   limExt[1] = Math.min(latlong[1], limExt[1])
-    //   limExt[2] = Math.max(latlong[0], limExt[2])
-    //   limExt[3] = Math.max(latlong[1], limExt[3])
-    //   coords.push(coord)
-    // }
-    // if (coords[0][0] !== coords[coords.length - 1][0] && coords[0][1] !== coords[coords.length - 1][1]) {
-    //   coords.push(coords[0])
-    // }
+    queues = []
+    for (let i = 0; i < processLimit; i++) {
+        const fromIndex = Math.ceil(gen_result.length / processLimit) * i
+        let toIndex = Math.ceil(gen_result.length / processLimit) * (i + 1)
+        if (fromIndex >= gen_result.length) {
+          processLimit = i
+          break
+        }
+        if (toIndex >= gen_result.length) { toIndex = gen_result.length }
+        const threadCoords = gen_result.slice(fromIndex, toIndex)
+        queues.push(`${JSON.stringify(threadCoords)}|||${fa_str}|||${bd_str}|||${sim_str}|||${fa_bottom_left_str}|||${sim_bottom_left_str}|||${gridSize}`)
+    }
+    const result_queues = queues.map(x => POOL.run(x, OPTIONS_EX))
+    let i = 0;
+    let result = []
+    for (const q of result_queues) {
+      const r = await(q)
+      result = result.concat(r)
+    }
 
-    // pyProg.stdout.on('data', function(data) {
 
-    //     console.log(data.toString());
-    //     res.write(data);
-    //     res.end('end');
-    // });
-
+    for (let i = 0; i < result.length; i++) {
+      const offsetX = gen_result_index[i] % cols
+      const offsetY = Math.floor(gen_result_index[i] / cols)
+      const xcoord = extent[0] + offsetX * gridSize
+      const ycoord = extent[1] + offsetY * gridSize
+      const cachedCoord = [
+        Math.floor(xcoord / cacheDist) * cacheDist,
+        Math.floor(ycoord / cacheDist) * cacheDist,
+      ]
+      cachedCoord.push(Math.floor((xcoord - cachedCoord[0]) / gridSize))
+      cachedCoord.push(Math.floor((ycoord - cachedCoord[1]) / gridSize))
+      // cachedCoord.push((xcoord - cachedCoord[0]) / gridSize)
+      // cachedCoord.push((ycoord - cachedCoord[1]) / gridSize)
+      const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
+      if (cachedResultMatch) {
+        cachedResultMatch[cachedCoord[2]][cachedCoord[3]] = result[i]
+      }
+    }
+    for (const file in cachedResult) {
+      fs.writeFileSync(`result/${simulationType}_${gridSize}_${file}`, JSON.stringify(cachedResult[file]))
+    }
+  
+    console.log('--------------------------------')
+    return [result.concat(cached_result), gen_result_index.concat(cached_result_index), [cols, rows], bottom_left, {wind_stns: []}]
 }
 
 module.exports = {

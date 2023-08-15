@@ -4,11 +4,6 @@ const Jimp = require('jimp');
 const fs = require('fs');
 const { sg_wind } = require('./sg_wind_all.js');
 
-if (fs.existsSync('./test')) {
-    fs.rmSync('./test', {recursive: true, force: true})
-}
-fs.mkdirSync('./test')
-
 
 const NORM_SCALING = 1
 const MAX_OBS_TOL = 0
