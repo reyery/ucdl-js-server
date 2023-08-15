@@ -1,6 +1,6 @@
 const express = require('express')
 const cors = require('cors')
-const generate = require("./simulations/sim_generate").execute;
+const THREE = require("three");
 const Shape = require('@doodle3d/clipper-js').default;
 const path = require('path');
 
@@ -8,10 +8,10 @@ const shapefile = require("shapefile");
 const proj4 = require('proj4');
 const SIMFuncs = require("@design-automation/mobius-sim-funcs").SIMFuncs;
 const fs = require('fs');
-const { exec } = require("child_process");
 const { sg_wind_stn_data } = require('./simulations/sg_wind_station_data');
 const { Piscina } = require('piscina');
 const { config } = require('./simulations/const');
+const { runRasterSimulation } = require('./sim_raster');
 
 // const cluster = require("cluster");
 const os = require('os');
@@ -19,11 +19,12 @@ const os = require('os');
 const systemCpuCores = os.cpus();
 const POOL_SETTINGS = {
   // minThreads: 5,
-  maxThreads: 64,
+  maxThreads: 5,
   idleTimeout: 60000
 }
 let POOL = new Piscina(POOL_SETTINGS)
 const TILES_PER_WORKER = 500
+const NUM_TILES_PER_CACHE_FILE = 200
 
 const app = express()
 app.use(cors())
@@ -31,6 +32,9 @@ app.use(express.json({ limit: '10mb' }))
 
 if (!fs.existsSync('temp')) {
   fs.mkdirSync('temp')
+}
+if (!fs.existsSync('result')) {
+  fs.mkdirSync('result')
 }
 const port = 5202
 
@@ -61,7 +65,7 @@ const RESOURCE_LIM_DICT = {
   2: 128,
   1: 128
 }
-const SIM_DISTANCE_LIMIT_METER = 300
+const SIM_DISTANCE_LIMIT_METER = 350
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
 
 function _createProjection() {
@@ -79,19 +83,10 @@ function _createProjection() {
 const proj_obj = _createProjection()
 
 
+
 function getSession() {
   return 's' + (new Date()).getTime()
 }
-
-function fillString(x) {
-  if (x < 0) {
-    const s = x.toString()
-    return '-' + ('00000' + s.slice(1)).slice(s.length - 1)
-  }
-  const s = x.toString()
-  return ('00000' + s).slice(s.length)
-}
-
 
 
 
@@ -106,15 +101,44 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   const coords = []
   for (const latlong of boundary) {
     const coord = [...proj_obj.forward(latlong), 0]
-    limCoords[0] = Math.min(coord[0], limCoords[0])
-    limCoords[1] = Math.min(coord[1], limCoords[1])
-    limCoords[2] = Math.max(coord[0], limCoords[2])
-    limCoords[3] = Math.max(coord[1], limCoords[3])
+    limCoords[0] = Math.min(Math.floor(coord[0] / gridSize) * gridSize, limCoords[0])
+    limCoords[1] = Math.min(Math.floor(coord[1] / gridSize) * gridSize, limCoords[1])
+    limCoords[2] = Math.max(Math.ceil(coord[0] / gridSize) * gridSize, limCoords[2])
+    limCoords[3] = Math.max(Math.ceil(coord[1] / gridSize) * gridSize, limCoords[3])
     limExt[0] = Math.min(latlong[0], limExt[0])
     limExt[1] = Math.min(latlong[1], limExt[1])
     limExt[2] = Math.max(latlong[0], limExt[2])
     limExt[3] = Math.max(latlong[1], limExt[3])
     coords.push(coord)
+  }
+  if (coords[0][0] !== coords[coords.length - 1][0] && coords[0][1] !== coords[coords.length - 1][1]) {
+    coords.push(coords[0])
+  }
+  const cacheDist = NUM_TILES_PER_CACHE_FILE * gridSize
+  const cachedResultRange = [
+    Math.floor(limCoords[0] / cacheDist) * cacheDist,
+    Math.floor(limCoords[1] / cacheDist) * cacheDist,
+    Math.floor(limCoords[2] / cacheDist) * cacheDist,
+    Math.floor(limCoords[3] / cacheDist) * cacheDist,
+  ]
+  const cachedResult = {}
+  for (let x = cachedResultRange[0]; x <= cachedResultRange[2]; x += cacheDist) {
+    for (let y = cachedResultRange[1]; y <= cachedResultRange[3]; y += cacheDist) {
+      const fileName = `result/${simulationType}_${gridSize}_${x}_${y}`
+      if (!fs.existsSync(fileName)) {
+        cachedResult[`${x}_${y}`] = []
+        for (let i = 0; i < NUM_TILES_PER_CACHE_FILE; i++) {
+          const col = []
+          for (let j = 0; j < NUM_TILES_PER_CACHE_FILE; j++) {
+            col.push(null)
+          }
+          cachedResult[`${x}_${y}`].push(col)
+        }
+      } else {
+        const cachedResultText = fs.readFileSync(fileName, {encoding: 'utf8'})
+        cachedResult[`${x}_${y}`] = JSON.parse(cachedResultText)
+      }
+    }
   }
 
   const mfn = new SIMFuncs();
@@ -153,15 +177,27 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
 
     const ps = mfn.make.Position(pos)
     const pg = mfn.make.Polygon(ps)
-    mfn.make.Extrude(pg, result.value.properties.AGL, 1, 'quads')
-    basePgons.push(pg)
+    if (simulationType === 'wind') {
+      mfn.attrib.Set(pg, 'height_max', result.value.properties.AGL)
+      mfn.attrib.Set(pg, 'height_min', 0)
+    } else {
+      mfn.make.Extrude(pg, result.value.properties.AGL, 1, 'quads')
+      basePgons.push(pg)
+    }
   }
+  
   mfn.edit.Delete(basePgons, 'delete_selected')
 
   let allObstructions = mfn.query.Get('pg', null)
   if (allObstructions.length === 0) {
-    const dummyps = mfn.make.Position([[0, 0, -1], [2, 0, -1], [0, 2, -1]])
+    const dummyps = mfn.make.Position([
+      [limCoords[0] - 200, limCoords[1] - 200, -1],
+      [limCoords[2] + 200, limCoords[3] + 200, -1],
+      [limCoords[0] - 200, limCoords[3] + 200, -1]
+    ])
     const dummypg = mfn.make.Polygon(dummyps)  
+    mfn.attrib.Set(dummypg, 'height_max', -10)
+    mfn.attrib.Set(dummypg, 'height_min', -20)
     allObstructions = [dummypg]
   }
 
@@ -190,19 +226,42 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   const options_gen = { filename: path.resolve("./", 'simulations/check_sim_area.js') }
   const options_ex = { filename: path.resolve("./", 'simulations/sim_execute.js') }
   let queues = []
+  let cachedQueues = []
 
   for (let i = 0; i < processLimit; i++) {
     const startNum = numCoordsPerThread * i
     let endNum = numCoordsPerThread * (i + 1)
     if (endNum > total) { endNum = total; }
     const simCoords = []
+    const cachedCoords = []
     for (let j = startNum; j < endNum; j++) {
       const offsetX = j % cols
       const offsetY = Math.floor(j / cols)
-      simCoords.push([limCoords[0] + offsetX * gridSize, limCoords[1] + offsetY * gridSize])
+      const xcoord = limCoords[0] + offsetX * gridSize
+      const ycoord = limCoords[1] + offsetY * gridSize
+      const cachedCoord = [
+        Math.floor(xcoord / cacheDist) * cacheDist,
+        Math.floor(ycoord / cacheDist) * cacheDist,
+      ]
+      cachedCoord.push((xcoord - cachedCoord[0]) / gridSize)
+      cachedCoord.push((ycoord - cachedCoord[1]) / gridSize)
+      const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
+      if (cachedResultMatch && (cachedResultMatch[cachedCoord[2]][cachedCoord[3]] || cachedResultMatch[cachedCoord[2]][cachedCoord[3]] === 0)) {
+        simCoords.push([null, null])
+        cachedCoords.push([xcoord, ycoord, cachedResultMatch[cachedCoord[2]][cachedCoord[3]]])
+      } else {
+        simCoords.push([xcoord, ycoord])
+        cachedCoords.push([null, null])
+      }
+      // simCoords.push([xcoord, ycoord])
+      // cachedCoords.push([null, null])
     }
-    if (simCoords.length === 0) { continue }
-    queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}`)
+    if (simCoords.length > 0) {
+      queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}|||true`)
+    }
+    if (cachedCoords.length > 0) {
+      cachedQueues.push(`${JSON.stringify(coords)}|||${JSON.stringify(cachedCoords)}|||${gridSize}|||${startNum}|||true`)
+    }
   }
   const gen_result_queues = []
   await Promise.all(queues.map(x => gen_result_queues.push(POOL.run(x, options_gen))))
@@ -212,6 +271,15 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
     const r = await result_promise
     gen_result = gen_result.concat(r[0])
     gen_result_index = gen_result_index.concat(r[1])
+  }
+  const cached_result_queues = []
+  await Promise.all(cachedQueues.map(x => cached_result_queues.push(POOL.run(x, options_gen))))
+  let cached_result = []
+  let cached_result_index = []
+  for (const result_promise of cached_result_queues) {
+    const r = await result_promise
+    cached_result = cached_result.concat(r[0].map(c => c[2]))
+    cached_result_index = cached_result_index.concat(r[1])
   }
 
   queues = []
@@ -246,17 +314,41 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   await Promise.all(queues.map(x => POOL.run(x, options_ex)))
   if (simulationType === 'wind') {
     const wind_stns = new Set()
-    for (let i = 0; i < processLimit; i++) {
-      const wind_stn_file = `temp/${session}/file_${session}_${i}_wind_stns.txt`
-      if (fs.existsSync(wind_stn_file)) {
-        const wind_stns_used = fs.readFileSync(wind_stn_file, { encoding: 'utf8', flag: 'r' })
-        for (const stn of wind_stns_used.split(',')) {
-          wind_stns.add(stn.trim())
+    for (let i = 1; i < coords.length; i ++) {
+      const j = i - 1
+      const unitdirvec = new THREE.Vector2(x = coords[i][0] - coords[j][0], y = coords[i][1] - coords[j][1]).normalize().multiplyScalar(gridSize)
+      const scaling = Math.abs((coords[i][0] - coords[j][0]) / unitdirvec.x)
+      for (let k = 0; k <= scaling; k++) {
+        const checkCoord = [i * unitdirvec.x + coords[j][0], i * unitdirvec.y + coords[j][1]]
+        const closest_stn = {
+          id: '',
+          dist2: 9999999999
         }
+        for (const stn of sg_wind_stn_data) {
+            const distx = stn.coord[0] - checkCoord[0]
+            const disty = stn.coord[1] - checkCoord[1]
+            const dist2 = distx * distx + disty * disty
+            if (!closest_stn.dist2 || closest_stn.dist2 > dist2) {
+                closest_stn.id = stn.id
+                closest_stn.dist2 = dist2
+            }
+        }
+        wind_stns.add(closest_stn.id)
       }
     }
+    // for (let i = 0; i < processLimit; i++) {
+    //   const wind_stn_file = `temp/${session}/file_${session}_${i}_wind_stns.txt`
+    //   if (fs.existsSync(wind_stn_file)) {
+    //     const wind_stns_used = fs.readFileSync(wind_stn_file, { encoding: 'utf8', flag: 'r' })
+    //     for (const stn of wind_stns_used.split(',')) {
+    //       wind_stns.add(stn.trim())
+    //     }
+    //   }
+    // }
     otherInfo.wind_stns = Array.from(wind_stns)
   }
+
+  // combining results
   let compiledResult = []
   for (let i = 0; i < processLimit; i++) {
     try {
@@ -271,9 +363,29 @@ async function runJSSimulation(reqBody, simulationType, reqSession = null) {
   }
   console.log('deleting file: file_' + session + '.sim')
   fs.rmSync('temp/' + session, { recursive: true, force: true });
-  const fullResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
-  return [fullResult, gen_result_index, [cols, rows], otherInfo]
+  const simResult = JSON.parse('[' + compiledResult.join(', \n') + ']')
+  for (let i = 0; i < simResult.length; i++) {
+    const offsetX = gen_result_index[i] % cols
+    const offsetY = Math.floor(gen_result_index[i] / cols)
+    const xcoord = limCoords[0] + offsetX * gridSize
+    const ycoord = limCoords[1] + offsetY * gridSize
+    const cachedCoord = [
+      Math.floor(xcoord / cacheDist) * cacheDist,
+      Math.floor(ycoord / cacheDist) * cacheDist,
+    ]
+    cachedCoord.push((xcoord - cachedCoord[0]) / gridSize)
+    cachedCoord.push((ycoord - cachedCoord[1]) / gridSize)
+    const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
+    if (cachedResultMatch) {
+      cachedResultMatch[cachedCoord[2]][cachedCoord[3]] = simResult[i]
+    }
+  }
+  for (const file in cachedResult) {
+    fs.writeFileSync(`result/${simulationType}_${gridSize}_${file}`, JSON.stringify(cachedResult[file]))
+  }
+  return [simResult.concat(cached_result), gen_result_index.concat(cached_result_index), [cols, rows], otherInfo]
 }
+
 
 function logTime(starttime, simType, otherInfo = '') {
   const duration = Math.round((new Date() - starttime) / 1000)
@@ -337,13 +449,15 @@ app.post('/sky', async (req, res) => {
 app.post('/wind', async (req, res) => {
   try {
     const starttime = new Date()
-    const [result, resultIndex, dimension, otherInfo] = await runJSSimulation(req.body, 'wind', session = req.body.session)
+    console.log('!!!!!!')
+    const [result, resultIndex, dimension, extent, otherInfo] = await runRasterSimulation(POOL, req.body, 'wind', session = req.body.session)
     const origin = req.socket.remoteAddress;
     const runtime = logTime(starttime, 'wind', origin)
     res.send({
       result: result,
       resultIndex: resultIndex,
       dimension: dimension,
+      extent: extent,
       wind_stns: otherInfo.wind_stns,
       runtime: runtime
     })
@@ -362,7 +476,6 @@ app.post('/getAreaInfo', async (req, res) => {
     const starttime = new Date()
     const bounds = req.body.bounds
     const ext = bounds.reduce((ext, val) => {
-      console.log(val)
       ext[0] = Math.min(ext[0], val[0])
       ext[1] = Math.min(ext[1], val[1])
       ext[2] = Math.max(ext[2], val[0])
@@ -376,7 +489,6 @@ app.post('/getAreaInfo', async (req, res) => {
 
     const boundClipper = new Shape([bounds.map(coord => { return { X: coord[0] * 111139, Y: coord[1] * 111139 } })])
     boundClipper.fixOrientation()
-    console.log(boundClipper.totalArea())
 
     const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
 
@@ -404,8 +516,6 @@ app.post('/getAreaInfo', async (req, res) => {
       const ints = boundClipper.intersect(shp)
       shpArea += ints.totalArea()
 
-      console.log(shp.areas())
-
 
       // const xy = proj_obj.forward(c);
       // const floor_xy = xy.map(x => Math.floor(x / TILE_SIZE)  * TILE_SIZE)
@@ -419,8 +529,6 @@ app.post('/getAreaInfo', async (req, res) => {
       // }
       // geom[floor_xy.join('__')].push(result.value)
     }
-    console.log(boundClipper.totalArea())
-    console.log(shpArea)
 
     res.send({
       result: 'OK'
@@ -483,7 +591,6 @@ async function runUploadJSSimulation(reqBody, simulationType, reqSession = null)
   const otherInfo = {}
   const boundClipper = new Shape([featureBoundary.map(coord => { return { X: coord[0] * 1000000, Y: coord[1] * 1000000 } })])
   boundClipper.fixOrientation()
-  console.log('boundClipper', boundClipper, boundClipper.totalArea())
 
   const mfn = new SIMFuncs();
   await mfn.io.ImportData(data, 'sim');
