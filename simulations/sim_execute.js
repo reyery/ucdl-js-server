@@ -6,6 +6,7 @@ const sg_wind = require('./sg_wind_all.js').sg_wind;
 const proj4 = require('proj4');
 const { config } = require("./const.js");
 const { Wind, WindPrep } = require("./analyze_wind.js");
+const sg_stn_data = require('./sg_wind_station_data.js').sg_wind_stn_data;
 
 const solar_settings = {
     DETAIL: 1,
@@ -224,18 +225,57 @@ function eval_wind(sim) {
 
     // get sensors and obstructions
     const [sens_rays, obs_pgons, sens_pgons] = shared.getSensObs(sim, 'ground');
+    const obs_pgons_no_wlkwy = sim.query.Filter(obs_pgons, 'type', '!=', 'walkway');
 
-    const {closest_stns, result_indexing, raster_data} = WindPrep(sim, sens_rays, sens_pgons, settings.LAYERS)
+    // split sensors into groups based on their closest weather stations
+    const closest_stns = {}
+    const result_indexing = []
+    for (let i = 0; i < sens_pgons.length; i++) {
+        const sens_pos = sim.query.Get('ps', sens_pgons[i])
+        const pos_coords = sim.attrib.Get(sens_pos, 'xyz')
+        const mid_point = pos_coords.reduce((coord_sum, coord) => {
+            coord_sum[0] += coord[0];
+            coord_sum[1] += coord[1];
+            return coord_sum
+        }, [0,0]).map(x => x / pos_coords.length)
+
+        let closest_stn = {id: 'S24', dist2: null}
+        for (const stn of sg_stn_data) {
+            const distx = stn.coord[0] - mid_point[0]
+            const disty = stn.coord[1] - mid_point[1]
+            const dist2 = distx * distx + disty * disty
+            if (!closest_stn.dist2 || closest_stn.dist2 > dist2) {
+                closest_stn.id = stn.id
+                closest_stn.dist2 = dist2
+            }
+        }
+        if (!closest_stns[closest_stn.id]) {
+            closest_stns[closest_stn.id] = {
+                sens_pgons: [],
+                sens_rays: [],
+                result: null
+            }
+        }
+        result_indexing.push([closest_stn.id, closest_stns[closest_stn.id].sens_pgons.length])
+        closest_stns[closest_stn.id].sens_pgons.push(sens_pgons[i])
+        closest_stns[closest_stn.id].sens_rays.push(sens_rays[i])
+    }
 
     // run simulation for each of the weather station group
     const sim_name = 'Wind Permeability (ground)';
     for (const closest_stn_id in closest_stns) {
         const sg_wind_data = sg_wind[closest_stn_id];
+        sim.attrib.Set(null, 'wind', sg_wind_data, 'one_value');    
+
         const closest_stn = closest_stns[closest_stn_id]
         const sens_rays = closest_stn.sens_rays
+        const sens_pgons = closest_stn.sens_pgons
     
-        closest_stn.result = Wind(sens_rays, raster_data, sg_wind_data, settings.RADIUS, settings.LAYERS);
-        // closest_stn.result = Wind(sim.__model__, sens_rays, obs_pgons, settings.RADIUS, settings.NUM_RAYS, settings.LAYERS);
+        shared.checkErrorBeforSim(sim_name, sens_rays, obs_pgons_no_wlkwy);
+        const results = sim.analyze.Wind(sens_rays, obs_pgons_no_wlkwy, settings.RADIUS, settings.NUM_RAYS, settings.LAYERS);
+        const values = results['wind'].map(v => Math.min(Math.max(v, 0), 1) * 100);
+        shared.checkErrorAfterSim(sim_name, sens_rays, values);
+        closest_stn.result = values;
     }
     const values = result_indexing.map(x => closest_stns[x[0]].result[x[1]])
     // calc the score
