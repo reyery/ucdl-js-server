@@ -19,7 +19,7 @@ const os = require('os');
 const systemCpuCores = os.cpus();
 const POOL_SETTINGS = {
   // minThreads: 5,
-  maxThreads: 5,
+  // maxThreads: 5,
   idleTimeout: 60000
 }
 let POOL = new Piscina(POOL_SETTINGS)

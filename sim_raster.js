@@ -16,7 +16,7 @@ const path = require('path');
 // const WIND_BD_DATA = fs.readFileSync(WIND_BD_DIR)
 // const WIND_BD = parseGeoraster(WIND_BD_DATA)
 
-const WIND_CLIP_URL = 'http://172.26.51.153:5000' + '/wind_clip'
+const WIND_CLIP_URL = 'https://mdp.frs.ethz.ch/api/py/wind_clip'
 const TILES_PER_WORKER = 500
 const NUM_TILES_PER_CACHE_FILE = 200
 
