@@ -2,7 +2,7 @@ const Shape = require('@doodle3d/clipper-js').default;
 const Jimp = require('jimp');
 const fs = require('fs');
 
-const BUFFER_AREA_DIST = 200
+const BUFFER_AREA_DIST = 250
 const BUFFER_AREA_DIST_SQR = BUFFER_AREA_DIST * BUFFER_AREA_DIST
 const TOTAL_AREA = BUFFER_AREA_DIST_SQR * Math.PI
 const DEG_INTERVAL = 0.25
