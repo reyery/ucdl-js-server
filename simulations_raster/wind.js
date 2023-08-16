@@ -42,7 +42,7 @@ function analyze_sensor(sensor, fa_mask, bd_mask, sim_mask, fa_bottom_left, sim_
     for (let x = fa_pos_int[0] - 201; x < fa_pos_int[0] + 202; x ++) {
         for (let y = fa_pos_int[1] - 201; y < fa_pos_int[1] + 202; y ++) {
             if (x < 0 || y < 0 || x >= fa_mask[0].length || y >= fa_mask.length) { continue }
-            if (!fa_mask[y][x]) { continue }
+            if (!fa_mask[y][x] || fa_mask[y][x] < 0) { continue }
             const xdir = x + 0.5 - fa_pos[0]
             const ydir = y + 0.5 - fa_pos[1]
             const dist_sqr = xdir * xdir + ydir * ydir
@@ -158,11 +158,13 @@ function analyze_sensor(sensor, fa_mask, bd_mask, sim_mask, fa_bottom_left, sim_
     // image.write(`test/test_${fa_pos[0]}_${fa_pos[1]}.png`, (err) => {
     //     if (err) throw err;
     // });
+
     const FAD = sensor_result / area_count
     // return FAD
     // console.log('___ FAD:', FAD, '; dir_count:', dir_count, '; missing_count:', missing_count, '; time taken:', (performance.now() - start) / 1000)
     let VR = -1.64 * FAD + 0.28
     if (VR < 0) {VR = 0}
+    VR = Math.round(VR * 10000000) / 10000000
     return VR
 
 }
