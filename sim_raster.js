@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const axios = require('axios').default;
 const path = require('path');
 const { sg_wind_stn_data } = require('./simulations/sg_wind_station_data');
+const EventEmitter = require('events');
 
 // const WIND_FA_DIR = 'simulations_raster/raster/FA.tif'
 // const WIND_FA_DATA = fs.readFileSync(WIND_FA_DIR)
@@ -25,8 +26,6 @@ if (process.platform === 'win32') {
 const TILES_PER_WORKER = 500
 const NUM_TILES_PER_CACHE_FILE = 200
 
-const OPTIONS_GEN = { filename: path.resolve("./", 'simulations/check_sim_area.js') }
-const OPTIONS_EX = { filename: path.resolve("./", 'simulations_raster/wind.js') }
 
 
 function getSession() {
@@ -44,8 +43,11 @@ function _createProjection() {
 const proj_obj = _createProjection()
 
 
-async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = null) {
+async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType, reqSession = null) {
   const session = reqSession ? reqSession : getSession()
+  console.log('session', session)
+  EVENT_EMITTERS[session] = new EventEmitter()
+
   const { bounds, gridSize } = reqBody
   console.log('boundary', bounds)
   const p = await axios.post(WIND_CLIP_URL, {
@@ -175,7 +177,13 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
     }
   }
   const gen_result_queues = []
-  await Promise.all(queues.map(x => gen_result_queues.push(POOL.run(x, OPTIONS_GEN))))
+  if (!EVENT_EMITTERS[session]) { return }
+  const options_gen = { 
+    filename: path.resolve("./", 'simulations/check_sim_area.js'),
+    // signal: EVENT_EMITTERS[session]
+  }
+  EVENT_EMITTERS[session].setMaxListeners(queues.length)
+  await Promise.all(queues.map(x => gen_result_queues.push(POOL.run(x, options_gen))))
   let gen_result = []
   let gen_result_index = []
   for (const result_promise of gen_result_queues) {
@@ -184,7 +192,9 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
     gen_result_index = gen_result_index.concat(r[1])
   }
   const cached_result_queues = []
-  await Promise.all(cachedQueues.map(x => cached_result_queues.push(POOL.run(x, OPTIONS_GEN))))
+  if (!EVENT_EMITTERS[session]) { return }
+  EVENT_EMITTERS[session].setMaxListeners(cachedQueues.length)
+  await Promise.all(cachedQueues.map(x => cached_result_queues.push(POOL.run(x, options_gen))))
   let cached_result = []
   let cached_result_index = []
   for (const result_promise of cached_result_queues) {
@@ -210,14 +220,19 @@ async function runRasterSimulation(POOL, reqBody, simulationType, reqSession = n
     const threadCoords = gen_result.slice(fromIndex, toIndex)
     queues.push(`${JSON.stringify(threadCoords)}|||${fa_str}|||${bd_str}|||${sim_str}|||${fa_bottom_left_str}|||${sim_bottom_left_str}|||${gridSize}`)
   }
-  const result_queues = queues.map(x => POOL.run(x, OPTIONS_EX))
-  let i = 0;
+  console.log('!!! number of tasks:', queues.length)
+  if (!EVENT_EMITTERS[session]) { return }
+  const options_ex = { 
+    filename: path.resolve("./", 'simulations_raster/wind.js'),
+    // signal: EVENT_EMITTERS[session]
+  }
+  EVENT_EMITTERS[session].setMaxListeners(queues.length)
+  const result_queues = queues.map(x => POOL.run(x, options_ex))
   let result = []
   for (const q of result_queues) {
     const r = await (q)
     result = result.concat(r)
   }
-
 
   for (let i = 0; i < result.length; i++) {
     const offsetX = gen_result_index[i] % cols

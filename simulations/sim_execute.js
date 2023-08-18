@@ -281,12 +281,15 @@ function eval_wind(sim) {
     // calc the score
     const des_range = [config['g_wind_min'], config['g_wind_max']];
     const [des_area, score] = shared.calcScore(sim, values, sens_pgons, des_range);
+    for (let i = 0; i < values.length; i++) {
+        values[i] = values[i] * 0.26 / 100
+    }
     // return results
     return {
         sim_name: sim_name,
         sens_type: 'ground', 
         values: values, 
-        unit: '%',
+        unit: '',
         des_range: des_range,
         des_area: des_area, 
         score: score,
@@ -369,6 +372,7 @@ module.exports = (content) => {
     const obsfile = argv[1]
     const genfile = argv[2]
     const gridSize = Number.parseInt(argv[3])
+    if (!fs.existsSync(genfile)) { return }
     if (type && genfile) {
         try {
             simExecute(type, obsfile, genfile, gridSize)
