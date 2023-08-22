@@ -26,6 +26,49 @@ const POOL_SETTINGS = {
 let POOL = new Piscina(POOL_SETTINGS)
 const EVENT_EMITTERS = {}
 
+
+const port = 5202
+
+const LONGLAT = [103.778329, 1.298759];
+const TILE_SIZE = 500;
+const RESOURCE_LIM_DICT = {
+  10: 40,
+  5: 60,
+  2: 128,
+  1: 128
+}
+const SIM_DISTANCE_LIMIT_METER = 350
+const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
+const TEMP_CLEAR_TIME = 24 * 60 * 60 * 1000
+
+
+function _clearTempFolder() {
+  console.log('clearing temp folder')
+  const tempDir = './temp'
+  const dirs = fs.readdirSync(tempDir);
+  const currentTime = new Date()
+  for (const dir of dirs) {
+    if (!fs.existsSync(tempDir + '/' + dir)) {
+      console.log('directory', tempDir + '/' + dir, 'does not exist')
+      continue
+    }
+    console.log(dir)
+    if (fs.existsSync(tempDir + '/' + dir + '/info.txt')) {
+      const info = JSON.parse(fs.readFileSync(tempDir + '/' + dir + '/info.txt', { encoding: 'utf8', flag: 'r' }))
+      const createdTime = new Date(info.createdTime)
+      if ((currentTime - createdTime) > TEMP_CLEAR_TIME) {
+        console.log('  removing dir')
+        fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
+      }
+    } else {
+      console.log('  removing dir')
+      fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
+    }
+  }
+}
+setInterval(_clearTempFolder, 300000);
+_clearTempFolder()
+
 let NUM_CLUSTERS
 if (process.platform === 'win32') {
   NUM_CLUSTERS = 3
@@ -56,66 +99,6 @@ if (cluster.isMaster) {
   if (!fs.existsSync('result')) {
     fs.mkdirSync('result')
   }
-  const port = 5202
-
-  const bound = [
-    [
-      103.84603534265634,
-      1.283583459888149
-    ],
-    [
-      103.84683338174219,
-      1.2850590292996458
-    ],
-    [
-      103.84821493326024,
-      1.284265481937453
-    ],
-    [
-      103.84738686057385,
-      1.2828370962610478
-    ]
-  ]
-
-  const LONGLAT = [103.778329, 1.298759];
-  const TILE_SIZE = 500;
-  const RESOURCE_LIM_DICT = {
-    10: 40,
-    5: 60,
-    2: 128,
-    1: 128
-  }
-  const SIM_DISTANCE_LIMIT_METER = 350
-  const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
-  const TEMP_CLEAR_TIME = 24 * 60 * 60 * 1000
-
-  function _clearTempFolder() {
-    console.log('clearing temp folder')
-    const tempDir = './temp'
-    const dirs = fs.readdirSync(tempDir);
-    const currentTime = new Date()
-    for (const dir of dirs) {
-      if (!fs.existsSync(tempDir + '/' + dir)) {
-        console.log('directory', tempDir + '/' + dir, 'does not exist')
-        continue
-      }
-      console.log(dir)
-      if (fs.existsSync(tempDir + '/' + dir + '/info.txt')) {
-        const info = JSON.parse(fs.readFileSync(tempDir + '/' + dir + '/info.txt', { encoding: 'utf8', flag: 'r' }))
-        const createdTime = new Date(info.createdTime)
-        if ((currentTime - createdTime) > TEMP_CLEAR_TIME) {
-          console.log('  removing dir')
-          fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
-        }
-      } else {
-        console.log('  removing dir')
-        fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
-      }
-    }
-  }
-  setInterval(_clearTempFolder, 300000);
-  _clearTempFolder()
-
 
 
   function onCloseRequest(session) {
