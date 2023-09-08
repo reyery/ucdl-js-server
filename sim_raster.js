@@ -69,7 +69,6 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     }
     wind_stns.add(closest_stn.id)
   }
-  console.log(wind_stns)
 
   const { fa_mask_result, bd_mask_result, sim_mask_result,
     fa_affine_transf, sim_affine_transf,

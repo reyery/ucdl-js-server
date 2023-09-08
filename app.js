@@ -39,35 +39,9 @@ const RESOURCE_LIM_DICT = {
 }
 const SIM_DISTANCE_LIMIT_METER = 350
 const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
-const TEMP_CLEAR_TIME = 24 * 60 * 60 * 1000
+const TEMP_CLEAR_TIME = 30 * 24 * 60 * 60 * 1000
 
 
-function _clearTempFolder() {
-  console.log('clearing temp folder')
-  const tempDir = './temp'
-  const dirs = fs.readdirSync(tempDir);
-  const currentTime = new Date()
-  for (const dir of dirs) {
-    if (!fs.existsSync(tempDir + '/' + dir)) {
-      console.log('directory', tempDir + '/' + dir, 'does not exist')
-      continue
-    }
-    console.log(dir)
-    if (fs.existsSync(tempDir + '/' + dir + '/info.txt')) {
-      const info = JSON.parse(fs.readFileSync(tempDir + '/' + dir + '/info.txt', { encoding: 'utf8', flag: 'r' }))
-      const createdTime = new Date(info.createdTime)
-      if ((currentTime - createdTime) > TEMP_CLEAR_TIME) {
-        console.log('  removing dir')
-        fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
-      }
-    } else {
-      console.log('  removing dir')
-      fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
-    }
-  }
-}
-setInterval(_clearTempFolder, 300000);
-_clearTempFolder()
 
 let NUM_CLUSTERS
 if (process.platform === 'win32') {
@@ -81,6 +55,32 @@ if (cluster.isMaster) {
   for (let i = 0; i < NUM_CLUSTERS; i++) {
     cluster.fork();
   }
+
+  function _clearTempFolder() {
+    console.log('clearing temp folder')
+    const tempDir = './temp'
+    const dirs = fs.readdirSync(tempDir);
+    const currentTime = new Date()
+    for (const dir of dirs) {
+      if (!fs.existsSync(tempDir + '/' + dir)) {
+        console.log('directory', tempDir + '/' + dir, 'does not exist')
+        continue
+      }
+      if (fs.existsSync(tempDir + '/' + dir + '/info.txt')) {
+        const info = JSON.parse(fs.readFileSync(tempDir + '/' + dir + '/info.txt', { encoding: 'utf8', flag: 'r' }))
+        const createdTime = new Date(info.createdTime)
+        if ((currentTime - createdTime) > TEMP_CLEAR_TIME) {
+          console.log('  removing dir')
+          fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
+        }
+      } else {
+        console.log('  removing dir')
+        fs.rmSync(tempDir + '/' + dir, { recursive: true, force: true });
+      }
+    }
+  }
+  setInterval(_clearTempFolder, 60 * 60 * 1000);
+  _clearTempFolder()
 
   cluster.on("exit", (worker, code, signal) => {
     console.log(`worker ${worker.process.pid} died`);

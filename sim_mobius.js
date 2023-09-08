@@ -520,6 +520,7 @@ async function runUploadMobiusSimulation(EVENT_EMITTERS, POOL, reqBody, simulati
     queues = []
 
     fs.mkdirSync('temp/' + session)
+    fs.writeFileSync(`temp/${session}/info.txt`, JSON.stringify({ createdTime: (new Date()).toISOString() }))
     const obsFile = 'temp/' + session + '/obs.sim'
     console.log('writing file: file_' + session + '.sim')
     fs.writeFileSync(obsFile, await mfn.io.ExportData(null, 'sim'))

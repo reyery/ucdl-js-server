@@ -86,7 +86,6 @@ function eval_solar(sim) {
     };
 }
 function eval_sky(sim) {
-    sim.io.ExportData(null, 'sim').then(data => fs.writeFileSync('testsim.sim'))
     const settings = sky_settings
     // get sensors and obstructions
     const [sens_rays, obs_pgons, sens_pgons] = shared.getSensObs(sim, 'ground');
