@@ -394,6 +394,8 @@ if (cluster.isMaster) {
     })
   })
 
+  app.get('/*', (req, res) => res.send('JS server online'))
+
   app.listen(port, '0.0.0.0', () => {
     console.log(`Example app listening on port ${port}`)
   })
