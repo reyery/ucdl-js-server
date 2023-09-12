@@ -394,7 +394,19 @@ if (cluster.isMaster) {
     })
   })
 
-  app.get('/*', (req, res) => res.send('JS server online'))
+  app.get('/healthcheck', async (req, res) => {
+    const healthCheck = {
+        uptime: process.uptime(),
+        message: 'OK',
+        timestamp: Date.now()
+    };
+    try {
+        res.send(healthCheck);
+    } catch (error) {
+        healthCheck.message = error;
+        res.status(503).send();
+    }
+  });
 
   app.listen(port, '0.0.0.0', () => {
     console.log(`Example app listening on port ${port}`)
