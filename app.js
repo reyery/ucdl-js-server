@@ -424,6 +424,20 @@ if (cluster.isMaster) {
     res.status(200).send('ERROR:' + ex)
   })
 
+  app.get('/healthcheck', async (req, res) => {
+    const healthCheck = {
+        uptime: process.uptime(),
+        message: 'OK',
+        timestamp: Date.now()
+    };
+    try {
+        res.send(healthCheck);
+    } catch (error) {
+        healthCheck.message = error;
+        res.status(503).send();
+    }
+  });
+  
   app.get('/*', (req, res) => res.send('JS server online'))
 
   app.listen(port, '0.0.0.0', () => {
