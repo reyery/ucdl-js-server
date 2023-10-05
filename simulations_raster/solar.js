@@ -1,14 +1,14 @@
 const { default: Shape } = require("@doodle3d/clipper-js");
-const { skyRays, rayLineIntersect, rayPgonIntersect, iDir, crossProduct, vectorSub, pointInPgon, solarDirs } = require("./simulations_raster/util");
+const { rayLineIntersect, rayPgonIntersect, iDir, crossProduct, vectorSub, pointInPgon, solarDirs } = require("./util");
 
 const MAX_DIST = 350
 const MAX_DIST_SQR = MAX_DIST * MAX_DIST
+const SOLAR_DETAILS = 1
 
 
 // -------------------------------------------------------------------------------------------------
 let lat = null
 let vecs = null
-
 
 
 // function rayPgonIntersect(s, v, pgon) {
@@ -29,7 +29,7 @@ function analyze_sensor(sensor, buildings, lines, pgons) {
         //     return 0
         // }
     }
-    const result_max = vecs.reduce((sum, v) => (sum + v[0][2]) , 0) + 1
+    const result_max = vecs.reduce((sum, v) => (sum + v[0][2]) , 0)
     let result = result_max
     // check all lines obstruction
     for (const line of lines) {
@@ -63,26 +63,16 @@ function analyze_sensor(sensor, buildings, lines, pgons) {
                 const distSqr = (vec3D[0] * t) ** 2 + (vec3D[1] * t) ** 2
                 if (distSqr > MAX_DIST_SQR) { continue }
                 if ((distSqr + intsnHeight * intsnHeight) > MAX_DIST_SQR) { continue }
-                vecIndex[i] = [sensor[0] + vec3D[0] * t, sensor[1] + vec3D[1] * t, intsnHeight] 
+                vecIndex[i] = []
                 result -= vec3D[2]
             }
         }
     }
-    let vertVecCheck = true
     for (const pgon of pgons) {
         const pgonNorm = crossProduct(vectorSub(pgon[1], pgon[0]), vectorSub(pgon[2], pgon[0]))
         // if pgon's normal is vertical, check if it covers the sensor
         if (pgonNorm[0] === 0 && pgonNorm[1] === 0 && pgon[0][2] === 0 && pointInPgon([...sensor, 0], pgon, [0, 0, 1])) {
             return 0
-        }
-        // if pgon is not horizontal, check if it intersects with the vertical ray
-        if (vertVecCheck && pgonNorm[2] !== 0) {
-            const [intersect, intersectionPt] = rayPgonIntersect([...sensor, 0], [0, 0, 1], pgon, pgonNorm)
-            if (intersect) {
-                vertVecCheck = intersectionPt
-                console.log('_______~~~~1', vecIndex[i])
-                result -= 1
-            }
         }
         for (let i = 0; i < vecIndex.length; i++) {
             if (vecIndex[i]) { continue }
@@ -90,12 +80,11 @@ function analyze_sensor(sensor, buildings, lines, pgons) {
             const [intersect, intersectionPt] = rayPgonIntersect([...sensor, 0], vec3D, pgon, pgonNorm)
             if (intersect) {
                 vecIndex[i] = intersectionPt
-                console.log('_______~~~~2', vecIndex[i])
                 result -= vec3D[2]
             }
         }
     }
-    return [sensor, vecIndex, result / result_max * 100]
+    return result / result_max * 100
 }
 
 // =================================================================================================
@@ -103,11 +92,11 @@ function analyze_sensor(sensor, buildings, lines, pgons) {
  * 
  */
 function Solar(lines, pgons, buildings, sensors, gridSize, latitude, taskNum) {
-    console.log('starting sky task', taskNum)
+    console.log('starting solar task', taskNum)
     const result = []
     const halfGridSize = gridSize / 2
     if (!lat || !vecs || latitude !== lat) {
-        vecs = solarDirs(latitude, 3)
+        vecs = solarDirs(latitude, SOLAR_DETAILS)
         lat = latitude
     }
     for (const sensor of sensors) {
@@ -115,7 +104,6 @@ function Solar(lines, pgons, buildings, sensors, gridSize, latitude, taskNum) {
             const sensor_result = analyze_sensor([sensor[0] + halfGridSize, sensor[1] + halfGridSize], buildings, lines, pgons)
             if (sensor_result) {
                 result.push(sensor_result)
-                return sensor_result
                 continue
             }
         } catch (ex) {
@@ -128,70 +116,15 @@ function Solar(lines, pgons, buildings, sensors, gridSize, latitude, taskNum) {
 }
 
 
-const fs = require('fs');
-const { SIMFuncs } = require("@design-automation/mobius-sim-funcs");
-const data = fs.readFileSync('test_data.txt', {encoding: 'utf-8'})
-
-async function run() {
-    const argv = data.split('|||')
-    if (argv.length >= 3) {
+module.exports = (content) => {
+    const argv = content.split('|||')
+    if (argv.length >= 6) {
         const parsed_argv = argv.map(x => JSON.parse(x))
         const buildings = parsed_argv[2]
-        const grid_size = parsed_argv[4]
-        const half_grid_size = grid_size / 2
         for (let i = 0; i < buildings.length; i++) {
             buildings[i] = new Shape(buildings[i])
             buildings[i].fixOrientation()
         }
-        const r = Solar(...parsed_argv)
-
-        const sim = new SIMFuncs()
-        for (const line of parsed_argv[0]) {
-            const ps = sim.make.Position([[line[0][0], line[0][1], 0], [line[1][0], line[1][1], 0]])
-            const pl = sim.make.Polyline(ps)
-            sim.make.Extrude(pl, line[2], 1, 'quads')
-        }
-        const sensor = r[0]
-        const ps_sens = sim.make.Position([
-            [sensor[0] - half_grid_size, sensor[1] - half_grid_size, 0],
-            [sensor[0] + half_grid_size, sensor[1] - half_grid_size, 0],
-            [sensor[0] + half_grid_size, sensor[1] + half_grid_size, 0],
-            [sensor[0] - half_grid_size, sensor[1] + half_grid_size, 0],
-        ])
-        const pg_sens = sim.make.Polygon(ps_sens)
-        const ps_o = sim.make.Position([sensor[0], sensor[1], 0])
-        const lines = [[], []]
-        for (let i = 0; i < vecs.length; i++) {
-            if (!r[1][i]) {
-                const ps = sim.make.Position([sensor[0] + vecs[i][0][0] * MAX_DIST, sensor[1] + vecs[i][0][1] * MAX_DIST, vecs[i][0][2] * MAX_DIST])
-                const pl = sim.make.Polyline([ps_o, ps])
-                lines[0].push(pl)
-            } else {
-                const ps = sim.make.Position(r[1][i])
-                const pl = sim.make.Polyline([ps_o, ps])
-                lines[1].push(pl)
-            }
-        }
-        const __model__ = sim.__model__
-        __model__.modeldata.attribs.set.setModelAttribVal('line_mat', {
-            "type": "LineDashedMaterial",
-            "color": [1,1,1],
-            "vertexColors": 1,
-            "dashSize": 0,
-            "gapSize": 0,
-            "scale": 1
-        });
-        __model__.modeldata.attribs.add.addAttrib(6, 'material', 'string');
-        __model__.modeldata.attribs.add.addAttrib(1, 'rgb', 'list');
-        
-        sim.visualize.Color(lines[0], [0,1,0])
-        sim.attrib.Set(lines[0], 'material', 'line_mat')
-
-        sim.visualize.Color(lines[1], [1,0,0])
-        sim.attrib.Set(lines[1], 'material', 'line_mat')
-        await sim.io.ImportData(fs.readFileSync('testsim.sim', {encoding: 'utf-8'}), 'sim');
-        fs.writeFileSync('test1.sim', await sim.io.ExportData(null, 'sim'))
-    }    
+        return Solar(...parsed_argv)
+    }
 }
-
-run()

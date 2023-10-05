@@ -174,7 +174,7 @@ async function runMobiusSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize)
     const total = rows * cols
     if (total < processLimit * 10) {
-        processLimit = Math.floor(total / 10)
+        processLimit = Math.ceil(total / 10)
     } else if (processLimit < total / 10000) {
         processLimit = Math.ceil(total / 10000)
     }
@@ -260,7 +260,7 @@ async function runMobiusSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     delete mfn
 
     if (gen_result.length < (processLimit * 10)) {
-        processLimit = Math.floor(gen_result.length / 10)
+        processLimit = Math.ceil(gen_result.length / 10)
     } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
         processLimit = Math.ceil(gen_result.length / TILES_PER_WORKER)
     }
@@ -478,7 +478,7 @@ async function runUploadMobiusSimulation(EVENT_EMITTERS, POOL, reqBody, simulati
     const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize)
     const total = rows * cols
     if (total < processLimit * 10) {
-        processLimit = Math.floor(total / 10)
+        processLimit = Math.ceil(total / 10)
     } else if (processLimit < total / 10000) {
         processLimit = Math.ceil(total / 10000)
     }
@@ -530,7 +530,7 @@ async function runUploadMobiusSimulation(EVENT_EMITTERS, POOL, reqBody, simulati
     delete mfn
 
     if (gen_result.length < (processLimit * 10)) {
-        processLimit = Math.floor(gen_result.length / 10)
+        processLimit = Math.ceil(gen_result.length / 10)
     } else if ((gen_result.length / TILES_PER_WORKER) > processLimit) {
         processLimit = Math.ceil(gen_result.length / TILES_PER_WORKER)
     }

@@ -11,7 +11,7 @@ const fs = require('fs');
 const { sg_wind_stn_data } = require('./simulations/sg_wind_station_data');
 const { Piscina } = require('piscina');
 const { config } = require('./simulations/const');
-const { runRasterSimulation } = require('./sim_raster');
+const { runRasterSimulation, runUploadRasterSimulation, runUploadRasterSimulationWind, runRasterSimulationWind } = require('./sim_raster');
 const { runMobiusSimulation, runUploadMobiusSimulation } = require('./sim_mobius');
 
 const cluster = require("cluster");
@@ -20,7 +20,7 @@ const os = require('os');
 const systemCpuCores = os.cpus();
 const POOL_SETTINGS = {
   // minThreads: 5,
-  // maxThreads: systemCpuCores.length,
+  maxThreads: systemCpuCores.length,
   idleTimeout: 60000
 }
 let POOL = new Piscina(POOL_SETTINGS)
@@ -29,16 +29,6 @@ const EVENT_EMITTERS = {}
 
 const port = 5202
 
-const LONGLAT = [103.778329, 1.298759];
-const TILE_SIZE = 500;
-const RESOURCE_LIM_DICT = {
-  10: 40,
-  5: 60,
-  2: 128,
-  1: 128
-}
-const SIM_DISTANCE_LIMIT_METER = 350
-const SIM_DISTANCE_LIMIT_LATLONG = SIM_DISTANCE_LIMIT_METER / 111111
 const TEMP_CLEAR_TIME = 30 * 24 * 60 * 60 * 1000
 
 
@@ -135,7 +125,7 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      const [result, resultIndex, dimension, _] = await runMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
+      const [result, resultIndex, dimension, extent, otherInfo] = await runRasterSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'solar', origin)
 
@@ -143,10 +133,9 @@ if (cluster.isMaster) {
         result: result,
         resultIndex: resultIndex,
         dimension: dimension,
-        runtime: runtime,
-        debugInfo: {
-          cpus: systemCpuCores.length
-        }
+        extent: extent,
+        wind_stns: otherInfo.wind_stns,
+        runtime: runtime
       })
       return
     } catch (ex) {
@@ -185,7 +174,7 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      const [result, resultIndex, dimension, extent, otherInfo] = await runRasterSimulation(EVENT_EMITTERS, POOL, req.body, 'wind', session)
+      const [result, resultIndex, dimension, extent, otherInfo] = await runRasterSimulationWind(EVENT_EMITTERS, POOL, req.body, 'wind', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'wind', origin)
       res.send({
@@ -324,7 +313,8 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      const [result, resultIndex, dimension, surrounding, _] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
+      const [result, resultIndex, dimension, surrounding, _] = await runUploadRasterSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
+      // const [result, resultIndex, dimension, surrounding, _] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'solar', origin)
       res.send({
@@ -349,7 +339,8 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      const [result, resultIndex, dimension, surrounding, _] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'sky', session)
+      const [result, resultIndex, dimension, surrounding, _] = await runUploadRasterSimulation(EVENT_EMITTERS, POOL, req.body, 'sky', session)
+      // const [result, resultIndex, dimension, surrounding, _] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'sky', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'sky', origin)
       res.send({
@@ -373,7 +364,8 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'wind', session)
+      // const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'wind', session)
+      const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadRasterSimulationWind(EVENT_EMITTERS, POOL, req.body, 'wind', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'wind', origin)
       res.send({
@@ -394,6 +386,44 @@ if (cluster.isMaster) {
     })
   })
 
+  app.post('/reg', async (req, res) => {
+    try {
+      let reg = []
+      if (fs.existsSync('user_reg.json')) {
+        const regStr = fs.readFileSync('user_reg.json')
+        if (regStr.length > 0) {
+          reg = JSON.parse(fs.readFileSync('user_reg.json'))
+        }
+      }
+      console.log('req', req.body)
+      const userData = req.body
+      reg.push({
+        name: userData.name,
+        email: userData.email,
+        time: new Date().toISOString()
+      })
+      // if (reg[userData.email]) {
+      //   reg[userData.email].push({
+      //     name: userData.name,
+      //     time: new Date().toISOString()
+      //   })
+      // } else {
+      //   reg[userData.email] = [
+      //     {
+      //       name: userData.name,
+      //       time: new Date().toISOString()
+      //     }
+      //   ]
+      // }
+      fs.writeFileSync('user_reg.json', JSON.stringify(reg))
+      res.send('ok')
+      return
+    } catch (ex) {
+      console.log('ERROR', ex)
+    }
+    res.status(200).send('ERROR:' + ex)
+  })
+
   app.get('/healthcheck', async (req, res) => {
     const healthCheck = {
         uptime: process.uptime(),
@@ -407,6 +437,8 @@ if (cluster.isMaster) {
         res.status(503).send();
     }
   });
+  
+  app.get('/*', (req, res) => res.send('JS server online'))
 
   app.listen(port, '0.0.0.0', () => {
     console.log(`Example app listening on port ${port}`)
