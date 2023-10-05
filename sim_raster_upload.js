@@ -58,23 +58,41 @@ const proj_obj_mob = _createProjection('WGS84',
   `+k=1 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs`
 )
 
-
-
-async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType, reqSession = null) {
+async function runUploadRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType, reqSession = null) {
   const session = reqSession ? reqSession : getSession()
   EVENT_EMITTERS[session] = new EventEmitter()
-
-  const { bounds, gridSize } = reqBody
-
-  // const { extent, data, simBoundary, featureBoundary, gridSize } = reqBody
+  const { extent, data, simBoundary, featureBoundary, gridSize } = reqBody
   const otherInfo = {}
+  const boundClipper = new Shape([featureBoundary.map(coord => { return { X: coord[0] * 1000000, Y: coord[1] * 1000000 } })])
+  boundClipper.fixOrientation()
   const obsLines = []
+  const obsPgons = []
   const buildings = []
+
+  const mfn = new SIMFuncs();
+  await mfn.io.ImportData(data, 'sim');
+
+  // TODO: add uploaded polygons into obsLines
+  let allObstructions = mfn.query.Get('pg', null)
+  const transf = [null, null, 0]
+  for (const pgon of allObstructions) {
+    const pgCoords = mfn.attrib.Get(mfn.query.Get('ps', pgon), 'xyz')
+    const newPgon = pgCoords.map(c => {
+      const latlong = proj_obj_mob.inverse([c[0], c[1]])
+      const newCoord = proj_obj_svy.forward(latlong)
+      return [newCoord[0], newCoord[1], c[2]]
+    })
+    obsPgons.push(newPgon)
+    transf[0] = newPgon[0][0] - pgCoords[0][0]
+    transf[1] = newPgon[0][1] - pgCoords[0][1]
+  }
+  mfn.modify.Move(allObstructions, transf)
 
   const limCoords = [99999, 99999, -99999, -99999];
   const boundExt = [99999, 99999, -99999, -99999];
+  const featrExt = [99999, 99999, -99999, -99999];
   const coords = []
-  for (const latlong of bounds) {
+  for (const latlong of simBoundary) {
     const coord = [...proj_obj_svy.forward(latlong), 0]
     limCoords[0] = Math.min(coord[0], limCoords[0])
     limCoords[1] = Math.min(coord[1], limCoords[1])
@@ -90,6 +108,13 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     coords.push(coords[0])
   }
 
+  for (const latlong of featureBoundary) {
+    featrExt[0] = Math.min(latlong[0], featrExt[0])
+    featrExt[1] = Math.min(latlong[1], featrExt[1])
+    featrExt[2] = Math.max(latlong[0], featrExt[2])
+    featrExt[3] = Math.max(latlong[1], featrExt[3])
+  }
+
   const shpFile = await shapefile.open(process.cwd() + "/assets/_shp_/singapore_buildings.shp")
 
   const limExt = [
@@ -98,7 +123,6 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     boundExt[2] + SIM_DISTANCE_LIMIT_LATLONG,
     boundExt[3] + SIM_DISTANCE_LIMIT_LATLONG,
   ]
-  const bottom_left = [limCoords[0], limCoords[1], boundExt[0], boundExt[1]]
 
   // add surrounding buildings as obstruction
   const surroundingBlks = []
@@ -117,7 +141,10 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     // check if the building can be used as surrounding obstruction
     for (const c of dataCoord) {
       if (c[0] > limExt[0] && c[1] > limExt[1] && c[0] < limExt[2] && c[1] < limExt[3]) {
-        check = true
+        const coordShape = new Shape([dataCoord.map(coord => { return { X: coord[0] * 1000000, Y: coord[1] * 1000000 } })])
+        coordShape.fixOrientation()
+        const intersection = coordShape.intersect(boundClipper)
+        if (intersection.paths.length > 0) { check = false } else { check = true }
         break
       }
     }
@@ -164,35 +191,6 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     })
   }
 
-  // look for existing result in cache
-  const cacheDist = NUM_TILES_PER_CACHE_FILE * gridSize
-  const cachedResultRange = [
-    Math.floor(limCoords[0] / cacheDist) * cacheDist,
-    Math.floor(limCoords[1] / cacheDist) * cacheDist,
-    Math.floor(limCoords[2] / cacheDist) * cacheDist,
-    Math.floor(limCoords[3] / cacheDist) * cacheDist,
-  ]
-  const cachedResult = {}
-  for (let x = cachedResultRange[0]; x <= cachedResultRange[2]; x += cacheDist) {
-    for (let y = cachedResultRange[1]; y <= cachedResultRange[3]; y += cacheDist) {
-
-      const fileName = `result/${simulationType}_${gridSize}_${x}_${y}`
-      if (!fs.existsSync(fileName)) {
-        cachedResult[`${x}_${y}`] = []
-        for (let i = 0; i < NUM_TILES_PER_CACHE_FILE; i++) {
-          const col = []
-          for (let j = 0; j < NUM_TILES_PER_CACHE_FILE; j++) {
-            col.push(null)
-          }
-          cachedResult[`${x}_${y}`].push(col)
-        }
-      } else {
-        const cachedResultText = fs.readFileSync(fileName, { encoding: 'utf8' })
-        cachedResult[`${x}_${y}`] = JSON.parse(cachedResultText)
-      }
-    }
-  }
-
   // mfn.io.Geolocate([config["latitude"], config["longitude"]], 0, 0);
   // find rows/cols number + total number of grids
   const cols = Math.ceil((limCoords[2] - limCoords[0]) / gridSize) + 1
@@ -207,28 +205,8 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     processLimit = Math.ceil(total / 10000)
   }
   const numCoordsPerThread = Math.ceil(total / processLimit)
-
   let queues = []
-  let cachedQueues = []
-
-  // // go through each grid coordinate (divide up into threads)
-  // for (let i = 0; i < processLimit; i++) {
-  //   const startNum = numCoordsPerThread * i
-  //   let endNum = numCoordsPerThread * (i + 1)
-  //   if (endNum > total) { endNum = total; }
-  //   const simCoords = []
-  //   for (let j = startNum; j < endNum; j++) {
-  //     const offsetX = j % cols
-  //     const offsetY = Math.floor(j / cols)
-  //     const xcoord = limCoords[0] + offsetX * gridSize
-  //     const ycoord = limCoords[1] + offsetY * gridSize
-  //     simCoords.push([xcoord, ycoord])
-  //   }
-  //   // add the coords threads into queue for check_sim_area script (check if the grid is inside the simulation boundary)
-  //   if (simCoords.length > 0) {
-  //     queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}|||true`)
-  //   }
-  // }
+  
 
   // go through each grid coordinate (divide up into threads)
   for (let i = 0; i < processLimit; i++) {
@@ -236,37 +214,16 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     let endNum = numCoordsPerThread * (i + 1)
     if (endNum > total) { endNum = total; }
     const simCoords = []
-    const cachedCoords = []
     for (let j = startNum; j < endNum; j++) {
-      // for each grid, find x, y
       const offsetX = j % cols
       const offsetY = Math.floor(j / cols)
       const xcoord = limCoords[0] + offsetX * gridSize
       const ycoord = limCoords[1] + offsetY * gridSize
-
-      // for each grid, check if result exists in cache
-      const cachedCoord = [
-        Math.floor(xcoord / cacheDist) * cacheDist,
-        Math.floor(ycoord / cacheDist) * cacheDist,
-      ]
-      cachedCoord.push(Math.floor((xcoord - cachedCoord[0]) / gridSize))
-      cachedCoord.push(Math.floor((ycoord - cachedCoord[1]) / gridSize))
-      const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
-      if (cachedResultMatch && (cachedResultMatch[cachedCoord[2]][cachedCoord[3]] || cachedResultMatch[cachedCoord[2]][cachedCoord[3]] === 0)) {
-        simCoords.push([null, null])
-        cachedCoords.push([xcoord, ycoord, cachedResultMatch[cachedCoord[2]][cachedCoord[3]]])
-      } else {
-        // if no cached result, add the coord for simulation
-        simCoords.push([xcoord, ycoord])
-        cachedCoords.push([null, null])
-      }
+      simCoords.push([xcoord, ycoord])
     }
     // add the coords threads into queue for check_sim_area script (check if the grid is inside the simulation boundary)
     if (simCoords.length > 0) {
       queues.push(`${JSON.stringify(coords)}|||${JSON.stringify(simCoords)}|||${gridSize}|||${startNum}|||true`)
-    }
-    if (cachedCoords.length > 0) {
-      cachedQueues.push(`${JSON.stringify(coords)}|||${JSON.stringify(cachedCoords)}|||${gridSize}|||${startNum}|||true`)
     }
   }
 
@@ -286,17 +243,7 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     gen_result = gen_result.concat(r[0])
     gen_result_index = gen_result_index.concat(r[1])
   }
-  const cached_result_queues = []
-  if (!EVENT_EMITTERS[session]) { return }
-  EVENT_EMITTERS[session].setMaxListeners(cachedQueues.length)
-  await Promise.all(cachedQueues.map(x => cached_result_queues.push(POOL.run(x, options_gen))))
-  let cached_result = []
-  let cached_result_index = []
-  for (const result_promise of cached_result_queues) {
-    const r = await result_promise
-    cached_result = cached_result.concat(r[0].map(c => c[2]))
-    cached_result_index = cached_result_index.concat(r[1])
-  }
+
 
   if (gen_result.length < (processLimit * 10)) {
     processLimit = Math.ceil(gen_result.length / 10)
@@ -308,6 +255,7 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
   // divide the grids up for simulation
   queues = []
   const linesStr = JSON.stringify(obsLines)
+  const pgonsStr = JSON.stringify(obsPgons)
   const buildingsStr = JSON.stringify(buildings)
   for (let i = 0; i < processLimit; i++) {
     const fromIndex = Math.ceil(gen_result.length / processLimit) * i
@@ -318,10 +266,8 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     }
     if (toIndex >= gen_result.length) { toIndex = gen_result.length }
     const threadCoords = gen_result.slice(fromIndex, toIndex)
-    queues.push(`${linesStr}|||[]|||${buildingsStr}|||${JSON.stringify(threadCoords)}|||${gridSize}|||${boundExt[1]}|||"${i+1}`)
-    // fs.writeFileSync('test_data.txt', `${linesStr}|||${pgonsStr}|||${buildingsStr}|||${JSON.stringify(threadCoords)}|||${gridSize}|||${boundExt[1]}|||"${i+1}"`)
+    queues.push(`${linesStr}|||${pgonsStr}|||${buildingsStr}|||${JSON.stringify(threadCoords)}|||${gridSize}|||${boundExt[1]}|||"${i+1}`)
   }
-
 
   console.log('!!! number of tasks:', queues.length)
   if (!EVENT_EMITTERS[session]) { return }
@@ -329,6 +275,7 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     filename: path.resolve("./", `simulations_raster/${simulationType}.js`),
     // signal: EVENT_EMITTERS[session]
   }
+
 
   // run simulation
   EVENT_EMITTERS[session].setMaxListeners(queues.length)
@@ -339,52 +286,24 @@ async function runRasterSimulation(EVENT_EMITTERS, POOL, reqBody, simulationType
     result = result.concat(r)
   }
 
-  // read result files and combine result
-  for (let i = 0; i < result.length; i++) {
-    const offsetX = gen_result_index[i] % cols
-    const offsetY = Math.floor(gen_result_index[i] / cols)
-    const xcoord = limCoords[0] + offsetX * gridSize
-    const ycoord = limCoords[1] + offsetY * gridSize
-    const cachedCoord = [
-      Math.floor(xcoord / cacheDist) * cacheDist,
-      Math.floor(ycoord / cacheDist) * cacheDist,
-    ]
-    cachedCoord.push(Math.floor((xcoord - cachedCoord[0]) / gridSize))
-    cachedCoord.push(Math.floor((ycoord - cachedCoord[1]) / gridSize))
-    // cachedCoord.push((xcoord - cachedCoord[0]) / gridSize)
-    // cachedCoord.push((ycoord - cachedCoord[1]) / gridSize)
-    const cachedResultMatch = cachedResult[`${cachedCoord[0]}_${cachedCoord[1]}`]
-    if (cachedResultMatch) {
-      cachedResultMatch[cachedCoord[2]][cachedCoord[3]] = result[i]
-    }
-  }
-
-  // write result
-  for (const file in cachedResult) {
-    fs.writeFileSync(`result/${simulationType}_${gridSize}_${file}`, JSON.stringify(cachedResult[file]))
-  }
-
-  // return [result.concat(cached_result), gen_result_index.concat(cached_result_index), [cols, rows], surroundingBlks, otherInfo]
-  return [result.concat(cached_result), gen_result_index.concat(cached_result_index), [cols, rows], bottom_left, {}]
+  return [result, gen_result_index, [cols, rows], surroundingBlks, otherInfo]
 
 }
 
-
-
-
-
-
-async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulationType, reqSession = null) {
+async function runUploadRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulationType, reqSession = null) {
   const session = reqSession ? reqSession : getSession()
   console.log('session', session)
   EVENT_EMITTERS[session] = new EventEmitter()
 
-  const { bounds, gridSize } = reqBody
-  console.log('boundary', bounds)
+  const { extent, data, simBoundary, featureBoundary, gridSize } = reqBody
+
+  // const { bounds, gridSize } = reqBody
+  // console.log('boundary', bounds)
+  console.log(data)
 
   // find nearest wind stations for HUD
   const wind_stns = new Set()
-  for (const coord of bounds) {
+  for (const coord of simBoundary) {
     const closest_stn = { id: '', dist2: null }
     for (const stn of sg_wind_stn_data) {
       const distx = stn.longitude - coord[0]
@@ -400,7 +319,7 @@ async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulation
 
   // get Frontal Area data from the python server for this boundary
   const p = await axios.post(WIND_CLIP_URL, {
-    bounds: bounds,
+    bounds: simBoundary,
     grid_size: gridSize
   }).then(resp => resp.data).catch(function (error) { console.log(error); });
 
@@ -410,8 +329,8 @@ async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulation
   const { fa_mask_result, bd_mask_result, sim_mask_result,
     fa_affine_transf, sim_affine_transf,
     fa_bottom_left, sim_bottom_left,
-    transf_bound,
-    extent, proj, nodata, success } = p;
+    transf_bound, proj, nodata, success } = p;
+  const rExtent = p.extent
   if (!success) {
     console.log('clipping failed')
     return [[], [], [0, 0, 0, 0], {}]
@@ -420,17 +339,17 @@ async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulation
   const bd_str = JSON.stringify(bd_mask_result)
   const sim_str = JSON.stringify(sim_mask_result)
   const fa_bottom_left_str = JSON.stringify(fa_bottom_left)
-  const sim_bottom_left_str = JSON.stringify(extent)
-  const bottom_left_lat_long = proj_obj_svy.inverse([extent[0], extent[1]])
-  const bottom_left = [extent[0], extent[1], bottom_left_lat_long[0], bottom_left_lat_long[1]]
+  const sim_bottom_left_str = JSON.stringify(rExtent)
+  const bottom_left_lat_long = proj_obj_svy.inverse([rExtent[0], rExtent[1]])
+  const bottom_left = [rExtent[0], rExtent[1], bottom_left_lat_long[0], bottom_left_lat_long[1]]
 
   // look for existing result in cache
   const cacheDist = NUM_TILES_PER_CACHE_FILE * gridSize
   const cachedResultRange = [
-    Math.floor(extent[0] / cacheDist) * cacheDist,
-    Math.floor(extent[1] / cacheDist) * cacheDist,
-    Math.floor(extent[2] / cacheDist) * cacheDist,
-    Math.floor(extent[3] / cacheDist) * cacheDist,
+    Math.floor(rExtent[0] / cacheDist) * cacheDist,
+    Math.floor(rExtent[1] / cacheDist) * cacheDist,
+    Math.floor(rExtent[2] / cacheDist) * cacheDist,
+    Math.floor(rExtent[3] / cacheDist) * cacheDist,
   ]
   const cachedResult = {}
   for (let x = cachedResultRange[0]; x <= cachedResultRange[2]; x += cacheDist) {
@@ -480,8 +399,8 @@ async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulation
       // for each grid, find x, y
       const offsetX = j % cols
       const offsetY = Math.floor(j / cols)
-      const xcoord = extent[0] + offsetX * gridSize
-      const ycoord = extent[1] + offsetY * gridSize
+      const xcoord = rExtent[0] + offsetX * gridSize
+      const ycoord = rExtent[1] + offsetY * gridSize
 
       // for each grid, check if result exists in cache
       const cachedCoord = [
@@ -576,8 +495,8 @@ async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulation
   for (let i = 0; i < result.length; i++) {
     const offsetX = gen_result_index[i] % cols
     const offsetY = Math.floor(gen_result_index[i] / cols)
-    const xcoord = extent[0] + offsetX * gridSize
-    const ycoord = extent[1] + offsetY * gridSize
+    const xcoord = rExtent[0] + offsetX * gridSize
+    const ycoord = rExtent[1] + offsetY * gridSize
     const cachedCoord = [
       Math.floor(xcoord / cacheDist) * cacheDist,
       Math.floor(ycoord / cacheDist) * cacheDist,
@@ -605,5 +524,6 @@ async function runRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simulation
 
 module.exports = {
   runRasterSimulation: runRasterSimulation,
-  runRasterSimulationWind: runRasterSimulationWind,
+  runUploadRasterSimulation: runUploadRasterSimulation,
+  runUploadRasterSimulationWind: runUploadRasterSimulationWind
 }

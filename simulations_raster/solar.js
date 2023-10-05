@@ -1,9 +1,9 @@
 const { default: Shape } = require("@doodle3d/clipper-js");
-const { skyRays, rayLineIntersect, rayPgonIntersect, iDir, crossProduct, vectorSub, pointInPgon, solarDirs } = require("./util");
+const { rayLineIntersect, rayPgonIntersect, iDir, crossProduct, vectorSub, pointInPgon, solarDirs } = require("./util");
 
 const MAX_DIST = 350
 const MAX_DIST_SQR = MAX_DIST * MAX_DIST
-const SOLAR_DETAILS = 2
+const SOLAR_DETAILS = 1
 
 
 // -------------------------------------------------------------------------------------------------
@@ -92,7 +92,7 @@ function analyze_sensor(sensor, buildings, lines, pgons) {
  * 
  */
 function Solar(lines, pgons, buildings, sensors, gridSize, latitude, taskNum) {
-    console.log('starting sky task', taskNum)
+    console.log('starting solar task', taskNum)
     const result = []
     const halfGridSize = gridSize / 2
     if (!lat || !vecs || latitude !== lat) {
