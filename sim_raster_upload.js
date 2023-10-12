@@ -523,7 +523,6 @@ async function runUploadRasterSimulationWind(EVENT_EMITTERS, POOL, reqBody, simu
 
 
 module.exports = {
-  runRasterSimulation: runRasterSimulation,
   runUploadRasterSimulation: runUploadRasterSimulation,
   runUploadRasterSimulationWind: runUploadRasterSimulationWind
 }

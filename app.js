@@ -11,7 +11,8 @@ const fs = require('fs');
 const { sg_wind_stn_data } = require('./simulations/sg_wind_station_data');
 const { Piscina } = require('piscina');
 const { config } = require('./simulations/const');
-const { runRasterSimulation, runUploadRasterSimulation, runUploadRasterSimulationWind, runRasterSimulationWind } = require('./sim_raster');
+const { runRasterSimulation, runRasterSimulationWind } = require('./sim_raster');
+const { runUploadRasterSimulation, runUploadRasterSimulationWind } = require('./sim_raster_upload');
 const { runMobiusSimulation, runUploadMobiusSimulation } = require('./sim_mobius');
 
 const cluster = require("cluster");
@@ -313,8 +314,8 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      const [result, resultIndex, dimension, surrounding, _] = await runUploadRasterSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
-      // const [result, resultIndex, dimension, surrounding, _] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
+      // const [result, resultIndex, dimension, surrounding, _] = await runRasterSimulationWind(EVENT_EMITTERS, POOL, req.body, 'solar', session)
+      const [result, resultIndex, dimension, surrounding, _] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'solar', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'solar', origin)
       res.send({
@@ -364,8 +365,8 @@ if (cluster.isMaster) {
       const starttime = new Date()
       const session = req.body.session
       req.socket.on('close', (_) => onCloseRequest(session))
-      // const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'wind', session)
-      const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadRasterSimulationWind(EVENT_EMITTERS, POOL, req.body, 'wind', session)
+      const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadMobiusSimulation(EVENT_EMITTERS, POOL, req.body, 'wind', session)
+      // const [result, resultIndex, dimension, surrounding, otherInfo] = await runUploadRasterSimulationWind(EVENT_EMITTERS, POOL, req.body, 'wind', session)
       const origin = req.socket.remoteAddress;
       const runtime = logTime(starttime, 'wind', origin)
       res.send({
